@@ -1,72 +1,89 @@
-:root { --app-height: 100dvh; } /* Dynamic viewport height fix */
+:root { --app-height: 100dvh; --theme-color: #00ff00; }
+body { margin: 0; background: #000; font-family: 'Segoe UI', sans-serif; height: var(--app-height); overflow: hidden; color: white; }
 
-body { margin: 0; background: #000; font-family: sans-serif; overflow: hidden; height: var(--app-height); }
-#app { display: flex; flex-direction: column; height: 100%; width: 100%; }
+#app { display: flex; flex-direction: column; height: 100%; }
 
-/* CAMERA (Top 55%) */
-#camera-section { 
-    flex: 55; position: relative; overflow: hidden; background: #111; 
+/* CAMERA SECTION */
+#scan-container { 
+    flex: 55; position: relative; background: #111; overflow: hidden;
 }
 #video-feed { 
     width: 100%; height: 100%; object-fit: cover; 
-    transform: scaleX(-1); /* Visual Mirror only */
+    transform: scaleX(-1); /* Default Mirror */
+    transition: transform 0.3s;
 }
-#hidden-canvas { display: none; }
+/* Class to un-mirror if user wants */
+.no-mirror { transform: scaleX(1) !important; }
 
-#overlay-guide {
-    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-    display: flex; justify-content: center; align-items: center;
-}
-.grid-box {
-    width: 250px; height: 250px;
+#vision-canvas { display: none; } /* Background processing */
+
+#grid-overlay {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 260px; height: 260px;
     display: flex; flex-wrap: wrap;
-    border: 4px solid #00ff00;
-    box-shadow: 0 0 20px rgba(0,255,0,0.5);
-    background: rgba(0,0,0,0.1);
+    border: 3px solid var(--theme-color);
+    box-shadow: 0 0 30px rgba(0,255,0,0.2);
+    z-index: 10;
 }
-.zone { 
-    width: 33.33%; height: 33.33%; 
-    border: 1px solid rgba(255,255,255,0.3); 
+
+.grid-cell {
+    width: 33.33%; height: 33.33%;
+    border: 1px solid rgba(255,255,255,0.3);
     position: relative;
+    box-sizing: border-box;
 }
-/* Center Aim Dot */
-.zone::after {
+/* The colored dot preview inside the cell */
+.grid-cell::after {
     content: ''; position: absolute; top: 50%; left: 50%;
-    width: 6px; height: 6px; background: rgba(0,255,0,0.8);
-    transform: translate(-50%, -50%); border-radius: 50%;
-}
-.center-zone { border: 2px solid yellow; } /* Highlight center */
-
-#status-pill {
-    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-    background: rgba(0,0,0,0.6); color: white; padding: 8px 16px;
-    border-radius: 20px; font-weight: bold; font-size: 14px;
-    pointer-events: none;
+    width: 12px; height: 12px; transform: translate(-50%, -50%);
+    border-radius: 50%; border: 2px solid rgba(0,0,0,0.5);
+    background-color: transparent; /* Set by JS */
+    transition: background-color 0.1s;
 }
 
-/* DASHBOARD (Bottom 45%) */
+#scan-instruction {
+    position: absolute; top: 20px; width: 100%; text-align: center;
+    font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    font-size: 18px; pointer-events: none;
+}
+#mirror-toggle {
+    position: absolute; top: 20px; right: 20px;
+    background: rgba(0,0,0,0.5); color: white; border: 1px solid white;
+    padding: 5px 10px; border-radius: 15px; font-size: 12px;
+}
+
+/* DASHBOARD */
 #dashboard { 
-    flex: 45; background: #1a1a1a; display: flex; flex-direction: column; 
-    padding: 10px; box-sizing: border-box; 
+    flex: 45; background: #1a1a1a; padding: 15px; 
+    display: flex; flex-direction: column; gap: 10px;
 }
 
-#three-preview { flex: 1; border-radius: 10px; background: #222; margin-bottom: 10px; }
+#three-preview { flex: 1; background: #222; border-radius: 12px; position: relative; }
 
-#face-nav { display: flex; justify-content: space-between; margin-bottom: 10px; }
+#face-nav { display: flex; justify-content: space-between; background: #111; padding: 5px; border-radius: 10px; }
 .nav-btn {
-    background: #333; color: #aaa; border: none; padding: 10px;
-    border-radius: 8px; font-weight: bold; cursor: pointer;
+    background: transparent; border: none; color: #666; 
+    font-weight: 800; padding: 10px; flex: 1; cursor: pointer;
 }
-.nav-btn.active { background: #00ff00; color: #000; }
-.nav-btn.done { border-bottom: 3px solid #00ff00; color: #fff; }
+.nav-btn.active { color: var(--theme-color); border-bottom: 2px solid var(--theme-color); }
+.nav-btn.scanned { color: white; background: #333; border-radius: 4px; }
 
-#action-area, #solution-step { height: 60px; display: flex; gap: 10px; }
-.big-btn { 
-    flex: 1; border: none; border-radius: 12px; font-size: 18px; 
-    background: white; font-weight: 800; cursor: pointer;
+#action-bar button {
+    width: 100%; padding: 15px; border: none; border-radius: 30px;
+    font-size: 16px; font-weight: bold; cursor: pointer; text-transform: uppercase;
 }
-.blue { background: #007aff; color: white; }
+#scan-btn { background: white; color: black; }
+#solve-btn { background: #007AFF; color: white; }
 .hidden { display: none !important; }
 
-#move-text { flex: 2; color: white; display: flex; align-items: center; justify-content: center; font-size: 24px; font-family: monospace; }
-#prev, #next { flex: 1; background: #444; color: white; border: none; border-radius: 8px; font-size: 20px; }
+/* SOLUTION MODAL */
+#solution-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.9); z-index: 100;
+    display: flex; justify-content: center; align-items: center;
+}
+.sol-card { background: #222; padding: 30px; border-radius: 20px; text-align: center; width: 80%; }
+#move-display { font-size: 40px; margin: 20px 0; font-family: monospace; color: var(--theme-color); }
+.sol-controls { display: flex; gap: 20px; justify-content: center; margin-bottom: 20px; }
+.sol-controls button { padding: 10px 30px; border-radius: 10px; border: none; font-weight: bold; }
+.close-btn { background: transparent; border: 1px solid #666; color: #888; padding: 10px; margin-top: 10px; }
