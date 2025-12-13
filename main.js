@@ -1,3 +1,5 @@
+Cube.initSolver();
+
 function solve() {
   const cube = cubeInput.value.trim();
 
