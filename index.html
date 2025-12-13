@@ -1,35 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>3×3 Cube Solver</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <title>3x3 Cube Solver</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
-<h1>3×3 Cube Solver</h1>
 
-<textarea id="cubeInput"
-placeholder="UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"></textarea>
+  <h1>3×3 Cube Solver</h1>
 
-<button onclick="solve()">Solve</button>
+  <textarea id="cubeInput">
+UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB
+  </textarea>
 
-<div id="solution"></div>
+  <button onclick="solveCube()">Solve</button>
 
-<div id="controls">
-  <button onclick="prevMove()">◀</button>
-  <button onclick="play()">▶</button>
-  <button onclick="nextMove()">▶▶</button>
-</div>
+  <div id="solution"></div>
 
-<canvas id="cubeCanvas"></canvas>
+  <canvas id="cubeCanvas"></canvas>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/cubejs/lib/cube.min.js"></script>
-<script src="solver.js"></script>
-<script src="cube3d.js"></script>
-<script src="moves.js"></script>
-<script src="main.js"></script>
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cubejs/lib/cube.min.js"></script>
+
+  <!-- App code -->
+  <script src="main.js"></script>
+
 </body>
 </html>
