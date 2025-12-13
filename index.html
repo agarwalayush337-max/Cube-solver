@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3×3 Cube Solver</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+<h1>3×3 Cube Solver</h1>
+
+<textarea id="cubeInput"
+placeholder="UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"></textarea>
+
+<button onclick="solve()">Solve</button>
+
+<div id="solution"></div>
+
+<div id="controls">
+  <button onclick="prevMove()">◀</button>
+  <button onclick="play()">▶</button>
+  <button onclick="nextMove()">▶▶</button>
+</div>
+
+<canvas id="cubeCanvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="solver.js"></script>
+<script src="cube3d.js"></script>
+<script src="moves.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
