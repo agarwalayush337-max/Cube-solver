@@ -7,14 +7,22 @@ Cube.initSolver(); // synchronous – must be called once
  * SOLVE BUTTON LOGIC
  ***********************/
 function solveCube() {
-  const input = document
-  .getElementById("cubeInput")
-  .value
-  .toUpperCase()
-  .replace(/\s+/g, "");
+  const raw = document.getElementById("cubeInput").value;
 
-  if (!isValidInput(input)) {
-    alert("Cube must contain exactly 9 of each: U R F D L B");
+  const input = raw
+    .toUpperCase()
+    .replace(/[^URFDLB]/g, "");
+
+  console.log("RAW:", JSON.stringify(raw));
+  console.log("SANITIZED:", input);
+  console.log("LENGTH:", input.length);
+
+  const counts = {};
+  for (const c of input) counts[c] = (counts[c] || 0) + 1;
+  console.log("COUNTS:", counts);
+
+  if (input.length !== 54) {
+    alert("Length is " + input.length + ", must be 54");
     return;
   }
 
@@ -24,11 +32,13 @@ function solveCube() {
 
     document.getElementById("solution").innerText =
       solution === "" ? "Already solved" : solution;
+
   } catch (e) {
-    alert("Invalid cube state");
-    console.error(e);
+    console.error("CUBEJS ERROR:", e);
+    alert("cubejs rejected this cube (see console)");
   }
 }
+
 
 /***********************
  * INPUT VALIDATION
