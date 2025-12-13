@@ -2,67 +2,381 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Pro Cube Solver</title>
-    <link rel="stylesheet" href="styles.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Perfect Cube Solver</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/cube.min.js"></script>
+
+    <style>
+        /* CSS STYLES */
+        :root { --app-height: 100dvh; --neon: #00ff00; }
+        body { margin: 0; background: #050505; font-family: 'Segoe UI', sans-serif; height: var(--app-height); overflow: hidden; color: white; display: flex; flex-direction: column; }
+        
+        /* TOP: CAMERA SCANNER */
+        #camera-zone {
+            flex: 60; position: relative; overflow: hidden; background: #000;
+        }
+        #video-feed {
+            width: 100%; height: 100%; object-fit: cover;
+            transform: scaleX(1); /* No Mirror by default for rear cam */
+        }
+        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+        #aim-grid {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 280px; height: 280px;
+            display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+            border: 4px solid var(--neon);
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+            z-index: 10;
+        }
+        .grid-cell {
+            border: 1px solid rgba(255,255,255,0.3);
+            position: relative;
+        }
+        /* The detected color dot */
+        .grid-cell::after {
+            content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 15px; height: 15px; border-radius: 50%;
+            background: rgba(0,0,0,0.5); border: 2px solid white;
+            transition: background 0.1s;
+        }
+        
+        #instruction-pill {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); padding: 8px 20px; border-radius: 20px;
+            font-weight: bold; font-size: 16px; border: 1px solid #333; z-index: 20;
+        }
+
+        /* BOTTOM: CONTROLS & 3D */
+        #control-zone {
+            flex: 40; background: #111; display: flex; flex-direction: column; padding: 10px; border-top: 1px solid #333;
+        }
+        
+        #preview-container {
+            flex: 1; background: #1a1a1a; border-radius: 12px; margin-bottom: 10px; overflow: hidden; position: relative;
+        }
+        #preview-label { position: absolute; top: 5px; left: 10px; font-size: 12px; color: #666; }
+
+        #face-bar { display: flex; justify-content: space-between; margin-bottom: 10px; background: #000; padding: 5px; border-radius: 30px; }
+        .face-btn {
+            background: none; border: none; color: #555; font-weight: 900; padding: 10px 15px; cursor: pointer; font-size: 14px;
+        }
+        .face-btn.active { color: var(--neon); }
+        .face-btn.done { color: white; position: relative; }
+        .face-btn.done::after { content: '•'; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); color: var(--neon); }
+
+        #main-btn {
+            width: 100%; padding: 15px; border: none; border-radius: 12px;
+            background: white; color: black; font-weight: 800; font-size: 18px; text-transform: uppercase;
+        }
+        #solve-btn { background: #007AFF; color: white; display: none; }
+        
+    </style>
 </head>
 <body>
 
-    <div id="app">
-        <div id="scan-container">
-            <video id="video-feed" autoplay playsinline muted></video>
-            
-            <canvas id="vision-canvas"></canvas>
-            
-            <div id="grid-overlay">
-                <div class="grid-cell" id="cell-0" onclick="manualCorrect(0)"></div>
-                <div class="grid-cell" id="cell-1" onclick="manualCorrect(1)"></div>
-                <div class="grid-cell" id="cell-2" onclick="manualCorrect(2)"></div>
-                <div class="grid-cell" id="cell-3" onclick="manualCorrect(3)"></div>
-                <div class="grid-cell center-cell" id="cell-4"></div> <div class="grid-cell" id="cell-5" onclick="manualCorrect(5)"></div>
-                <div class="grid-cell" id="cell-6" onclick="manualCorrect(6)"></div>
-                <div class="grid-cell" id="cell-7" onclick="manualCorrect(7)"></div>
-                <div class="grid-cell" id="cell-8" onclick="manualCorrect(8)"></div>
-            </div>
-
-            <div id="scan-instruction">Scan Center: <span id="target-color">WHITE</span></div>
-            <button id="mirror-toggle" class="icon-btn">⇄ Flip Cam</button>
-        </div>
-
-        <div id="dashboard">
-            <div id="three-preview"></div>
-            
-            <div id="face-nav">
-                <button class="nav-btn" data-face="U" onclick="selectFace('U')">UP</button>
-                <button class="nav-btn" data-face="L" onclick="selectFace('L')">LT</button>
-                <button class="nav-btn active" data-face="F" onclick="selectFace('F')">FR</button>
-                <button class="nav-btn" data-face="R" onclick="selectFace('R')">RT</button>
-                <button class="nav-btn" data-face="B" onclick="selectFace('B')">BK</button>
-                <button class="nav-btn" data-face="D" onclick="selectFace('D')">DN</button>
-            </div>
-
-            <div id="action-bar">
-                <button id="scan-btn" onclick="captureCurrentFace()">CAPTURE FACE</button>
-                <button id="solve-btn" class="hidden" onclick="solveCube()">SOLVE CUBE</button>
-            </div>
+    <div id="camera-zone">
+        <video id="video-feed" autoplay playsinline muted></video>
+        <canvas id="cv-canvas" style="display:none;"></canvas> <div id="instruction-pill">Align Center: <span id="target-name" style="color:white">WHITE</span></div>
+        
+        <div id="aim-grid">
+            <div class="grid-cell" id="c0"></div><div class="grid-cell" id="c1"></div><div class="grid-cell" id="c2"></div>
+            <div class="grid-cell" id="c3"></div><div class="grid-cell" id="c4"></div><div class="grid-cell" id="c5"></div>
+            <div class="grid-cell" id="c6"></div><div class="grid-cell" id="c7"></div><div class="grid-cell" id="c8"></div>
         </div>
     </div>
 
-    <div id="solution-overlay" class="hidden">
-        <div class="sol-card">
-            <h2>Solution Found</h2>
-            <div id="move-display">Ready</div>
-            <div class="sol-controls">
-                <button onclick="prevMove()">Prev</button>
-                <button onclick="nextMove()">Next</button>
-            </div>
-            <button class="close-btn" onclick="location.reload()">New Scan</button>
+    <div id="control-zone">
+        <div id="preview-container">
+            <span id="preview-label">LIVE 3D PREVIEW</span>
+            <div id="three-scene" style="width:100%; height:100%;"></div>
         </div>
+
+        <div id="face-bar">
+            <button class="face-btn active" onclick="setFace('U')">UP</button>
+            <button class="face-btn" onclick="setFace('L')">LT</button>
+            <button class="face-btn" onclick="setFace('F')">FR</button>
+            <button class="face-btn" onclick="setFace('R')">RT</button>
+            <button class="face-btn" onclick="setFace('B')">BK</button>
+            <button class="face-btn" onclick="setFace('D')">DN</button>
+        </div>
+
+        <button id="main-btn" onclick="capture()">CAPTURE FACE</button>
+        <button id="solve-btn" onclick="solve()" class="main-btn">SOLVE CUBE</button>
     </div>
 
-    <script src="app.js"></script>
+    <script>
+        // --- CONFIGURATION ---
+        // Distinct Colors for UI
+        const UI_COLORS = {
+            'U': '#FFFFFF', 'R': '#DC2626', 'F': '#16A34A',
+            'D': '#FACC15', 'L': '#EA580C', 'B': '#2563EB'
+        };
+        
+        // Logical Order
+        const FACE_ORDER = ['U', 'L', 'F', 'R', 'B', 'D'];
+        let currentFace = 'U';
+        
+        // Cube State (Stores the colors: 'U', 'R', etc.)
+        let cubeState = {
+            'U': Array(9).fill('U'), 'R': Array(9).fill('R'), 'F': Array(9).fill('F'),
+            'D': Array(9).fill('D'), 'L': Array(9).fill('L'), 'B': Array(9).fill('B')
+        };
+        
+        let liveColors = []; // Current colors seen by camera
+        
+        // THREE.JS Globals
+        let scene, camera, renderer, cubeGroup, allMeshes=[];
+
+        // --- 1. INITIALIZATION ---
+        window.onload = () => {
+            initCamera();
+            init3D();
+            setFace('U');
+        };
+
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                const video = document.getElementById('video-feed');
+                video.srcObject = stream;
+                video.play();
+                requestAnimationFrame(scanLoop);
+            } catch (err) { alert("Camera Error: " + err); }
+        }
+
+        // --- 2. VISION LOOP (THE FIX) ---
+        function scanLoop() {
+            const video = document.getElementById('video-feed');
+            const cvCanvas = document.getElementById('cv-canvas');
+            const ctx = cvCanvas.getContext('2d', { willReadFrequently: true });
+            
+            if(video.readyState === video.HAVE_ENOUGH_DATA) {
+                cvCanvas.width = video.videoWidth;
+                cvCanvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0);
+                
+                // Analyze Grid
+                liveColors = processGrid(ctx, cvCanvas.width, cvCanvas.height);
+                
+                // Update UI Dots
+                liveColors.forEach((colorChar, i) => {
+                    const cell = document.getElementById(`c${i}`);
+                    cell.querySelector('::after').style.backgroundColor = UI_COLORS[colorChar];
+                });
+
+                // Update 3D Model (Realtime Mirroring)
+                update3DTexture(liveColors);
+            }
+            requestAnimationFrame(scanLoop);
+        }
+
+        function processGrid(ctx, w, h) {
+            const size = Math.min(w, h) * 0.55; // Grid size relative to screen
+            const startX = (w - size) / 2;
+            const startY = (h - size) / 2;
+            const cellSize = size / 3;
+            
+            let detected = [];
+            
+            // We need to sample the center stickers to know what "Red" looks like right now
+            // But simple Euclidean distance to standard palette is safer for mobile web
+            
+            for(let i=0; i<9; i++) {
+                const row = Math.floor(i/3);
+                const col = i%3;
+                
+                const cx = startX + col*cellSize + cellSize/2;
+                const cy = startY + row*cellSize + cellSize/2;
+                
+                const p = ctx.getImageData(cx, cy, 1, 1).data;
+                detected.push(classifyColor(p[0], p[1], p[2]));
+            }
+            return detected;
+        }
+
+        // IMPROVED COLOR CLASSIFIER (HSV-Based for Red/Orange)
+        function classifyColor(r, g, b) {
+            // Convert to HSV
+            let rr=r/255, gg=g/255, bb=b/255;
+            let max=Math.max(rr,gg,bb), min=Math.min(rr,gg,bb);
+            let h, s, v=max;
+            let d = max - min;
+            s = max==0 ? 0 : d/max;
+
+            if(max==min) h=0;
+            else {
+                switch(max){
+                    case rr: h=(gg-bb)/d + (gg<bb?6:0); break;
+                    case gg: h=(bb-rr)/d + 2; break;
+                    case bb: h=(rr-gg)/d + 4; break;
+                }
+                h /= 6;
+            }
+
+            // --- THRESHOLDS ---
+            // White: Low Saturation
+            if (s < 0.15 && v > 0.4) return 'U';
+            
+            // Yellow: High Brightness, Yellow Hue
+            if (v > 0.5 && h > 0.12 && h < 0.2) return 'D';
+            
+            // Blue: 
+            if (h > 0.55 && h < 0.75) return 'B';
+            
+            // Green:
+            if (h > 0.25 && h < 0.45) return 'F';
+            
+            // RED vs ORANGE (The Tricky Part)
+            // Orange usually has Hue around 0.08 - 0.11
+            // Red is usually < 0.05 or > 0.95
+            
+            if (h > 0.05 && h < 0.12) return 'L'; // Orange
+            return 'R'; // Default to Red if high saturation and low hue
+        }
+
+        // --- 3. 3D SYSTEM ---
+        function init3D() {
+            const container = document.getElementById('three-scene');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.1, 100);
+            camera.position.z = 5;
+            camera.position.y = 0;
+            
+            renderer = new THREE.WebGLRenderer({antialias:true});
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+            
+            // Build Cube (27 cubies)
+            cubeGroup = new THREE.Group();
+            const geo = new THREE.BoxGeometry(0.92, 0.92, 0.92);
+            
+            for(let x=-1; x<=1; x++) {
+                for(let y=-1; y<=1; y++) {
+                    for(let z=-1; z<=1; z++) {
+                        // Create Mesh with 6 materials (Right, Left, Top, Bottom, Front, Back)
+                        const materials = Array(6).fill(null).map(()=> 
+                            new THREE.MeshBasicMaterial({color: 0x333333})
+                        );
+                        const mesh = new THREE.Mesh(geo, materials);
+                        mesh.position.set(x, y, z);
+                        mesh.userData = {x,y,z}; // Store logical pos
+                        cubeGroup.add(mesh);
+                        allMeshes.push(mesh);
+                    }
+                }
+            }
+            scene.add(cubeGroup);
+            
+            // Animation Loop
+            function animate() {
+                requestAnimationFrame(animate);
+                renderer.render(scene, camera);
+            }
+            animate();
+        }
+
+        function update3DTexture(colors) {
+            // Find which face of the 3D cube is facing the camera
+            // Based on 'currentFace' rotation logic
+            
+            // Map: Face Code -> { Axis, Value, MaterialIndex }
+            const MAP = {
+                'U': {ax:'y', val:1, idx:2}, 'D': {ax:'y', val:-1, idx:3},
+                'F': {ax:'z', val:1, idx:4}, 'B': {ax:'z', val:-1, idx:5},
+                'R': {ax:'x', val:1, idx:0}, 'L': {ax:'x', val:-1, idx:1}
+            };
+            
+            const cfg = MAP[currentFace];
+            
+            // Get the 9 meshes on this face
+            let faceMeshes = allMeshes.filter(m => m.userData[cfg.ax] === cfg.val);
+            
+            // SORTING: Critical to match Camera Grid (Top-Left -> Bottom-Right)
+            faceMeshes.sort((a,b) => {
+                // Sorting logic is specific to face orientation
+                // Simplified generic sort:
+                if(currentFace === 'U') return (a.userData.z - b.userData.z) || (a.userData.x - b.userData.x);
+                if(currentFace === 'D') return (b.userData.z - a.userData.z) || (a.userData.x - b.userData.x);
+                // Standard Front-like faces
+                return (b.userData.y - a.userData.y) || (a.userData.x - b.userData.x);
+            });
+            
+            // Paint
+            colors.forEach((c, i) => {
+                if(faceMeshes[i]) {
+                    faceMeshes[i].material[cfg.idx].color.set(UI_COLORS[c]);
+                }
+            });
+        }
+
+        // --- 4. APP LOGIC ---
+        function setFace(face) {
+            currentFace = face;
+            
+            // Update Buttons
+            document.querySelectorAll('.face-btn').forEach(b => b.classList.remove('active'));
+            const btn = Array.from(document.querySelectorAll('.face-btn')).find(b => b.innerText.includes(face=='L'?'LT':face=='R'?'RT':face=='F'?'FR':face=='B'?'BK':face=='U'?'UP':'DN'));
+            if(btn) btn.classList.add('active');
+            
+            // Update Label
+            const names = {'U':'WHITE (Up)', 'F':'GREEN (Front)', 'R':'RED (Right)', 'L':'ORANGE (Left)', 'B':'BLUE (Back)', 'D':'YELLOW (Down)'};
+            document.getElementById('target-name').innerText = names[face];
+            document.getElementById('target-name').style.color = UI_COLORS[face];
+
+            // Rotate 3D Cube to match
+            rotate3D(face);
+        }
+
+        function rotate3D(face) {
+            cubeGroup.rotation.set(0,0,0);
+            const R = Math.PI/2;
+            if(face==='U') cubeGroup.rotation.x = R;
+            if(face==='D') cubeGroup.rotation.x = -R;
+            if(face==='R') cubeGroup.rotation.y = -R;
+            if(face==='L') cubeGroup.rotation.y = R;
+            if(face==='B') cubeGroup.rotation.y = 2*R;
+            // Front is 0,0,0
+        }
+
+        function capture() {
+            // Save state
+            cubeState[currentFace] = [...liveColors];
+            
+            // Mark button as done
+            const btn = Array.from(document.querySelectorAll('.face-btn')).find(b => b.classList.contains('active'));
+            if(btn) btn.classList.add('done');
+            
+            // Auto advance
+            const idx = FACE_ORDER.indexOf(currentFace);
+            if(idx < 5) {
+                setFace(FACE_ORDER[idx+1]);
+            } else {
+                document.getElementById('main-btn').style.display = 'none';
+                document.getElementById('solve-btn').style.display = 'block';
+            }
+        }
+        
+        function solve() {
+            // Basic validation and worker call would go here
+            // For now, let's just alert the state string
+            let s = "";
+            ['U','R','F','D','L','B'].forEach(f => s += cubeState[f].join(''));
+            alert("Sending to Solver: " + s);
+            // Integration with solver-worker.js requires that file to be present
+            const worker = new Worker('solver-worker.js');
+            worker.postMessage(s);
+            worker.onmessage = (e) => {
+                if(e.data.success) alert("Solution: " + e.data.solution);
+                else alert("Error: " + e.data.error);
+            }
+        }
+    </script>
 </body>
 </html>
