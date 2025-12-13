@@ -1,296 +1,336 @@
 // ==========================================
-// CONFIGURATION & STATE
+// CONFIG & STATE
 // ==========================================
-let video, canvas, ctx;
-let openCvReady = false;
-
-// 3D Variables
-let scene, camera, renderer, cubeGroup;
-let cubeMeshes = []; // Array to store the 54 face meshes (9 per side * 6 sides)
-
-// Logic State
-let isScanning = true;
-let currentFaceIndex = 0; // 0=U, 1=R, 2=F, 3=D, 4=L, 5=B
-const faceOrder = ['U', 'R', 'F', 'D', 'L', 'B'];
-const faceNames = ['Up (White)', 'Right (Red)', 'Front (Green)', 'Down (Yellow)', 'Left (Orange)', 'Back (Blue)'];
-
-// Color Definitions (Display Colors)
 const COLORS = {
-    'U': 0xFFFFFF, // White
-    'R': 0xB90000, // Red
-    'F': 0x009E60, // Green
-    'D': 0xFFD500, // Yellow
-    'L': 0xFF5800, // Orange
-    'B': 0x0045AD, // Blue
-    'X': 0x333333  // Grey/Unscanned
+    'U': { hex: 0xFFFFFF, name: 'White' },
+    'R': { hex: 0xB90000, name: 'Red' },
+    'F': { hex: 0x009E60, name: 'Green' },
+    'D': { hex: 0xFFD500, name: 'Yellow' },
+    'L': { hex: 0xFF5800, name: 'Orange' },
+    'B': { hex: 0x0045AD, name: 'Blue' }
 };
 
-// State of the cube (what we will send to solver)
-// We fill this array as we scan.
+// Map standard order to indices for internal logic
+const FACE_ORDER = ['U', 'R', 'F', 'D', 'L', 'B'];
+let currentFace = 'U';
 let cubeState = {
-    'U': Array(9).fill('U'), // Default to White for U face
-    'R': Array(9).fill('R'),
-    'F': Array(9).fill('F'),
-    'D': Array(9).fill('D'),
-    'L': Array(9).fill('L'),
-    'B': Array(9).fill('B')
+    'U': Array(9).fill('U'), 'R': Array(9).fill('R'), 'F': Array(9).fill('F'),
+    'D': Array(9).fill('D'), 'L': Array(9).fill('L'), 'B': Array(9).fill('B')
 };
+let scannedFaces = new Set(); // Track which faces are done
+
+// ThreeJS Globals
+let scene, camera, renderer, cubeGroup;
+let allCubies = []; // Store mesh references
+
+let video, cvCanvas, cvCtx;
+let isScanning = true;
 
 // ==========================================
-// 1. STARTUP
+// 1. INITIALIZATION
 // ==========================================
 function onOpenCvReady() {
-    console.log("OpenCV Ready");
-    openCvReady = true;
-    init3D();       // Start the 3D cube immediately (bottom screen)
-    startCamera();  // Start the camera (top screen)
+    document.getElementById('loader').style.display = 'none';
+    initCamera();
+    init3D();
+    setupUI();
 }
 
-async function startCamera() {
-    video = document.getElementById('camera-feed');
-    canvas = document.getElementById('overlay-canvas');
-    ctx = canvas.getContext('2d');
+async function initCamera() {
+    video = document.getElementById('video-feed');
+    cvCanvas = document.getElementById('processing-canvas');
+    cvCtx = cvCanvas.getContext('2d', { willReadFrequently: true });
 
     try {
+        // Request Highest Definition possible for clarity
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+            video: { 
+                facingMode: 'environment',
+                width: { ideal: 1920 }, // Force high res
+                height: { ideal: 1080 },
+                focusMode: 'continuous'
+            }
         });
         video.srcObject = stream;
         video.onloadedmetadata = () => {
             video.play();
-            processVideoFrame(); // Start the vision loop
+            // Important: Match canvas size to video stream, NOT screen size
+            cvCanvas.width = video.videoWidth;
+            cvCanvas.height = video.videoHeight;
+            requestAnimationFrame(scanLoop);
         };
     } catch (err) {
         alert("Camera Error: " + err.message);
     }
-
-    document.getElementById('scan-btn').addEventListener('click', nextFace);
-    document.getElementById('solve-btn').addEventListener('click', solveCube);
 }
 
 // ==========================================
-// 2. VISION LOOP (Realtime Mirroring)
+// 2. VISION LOOP (HSV LOGIC)
 // ==========================================
-function processVideoFrame() {
-    if (!openCvReady || video.paused || video.ended) {
-        requestAnimationFrame(processVideoFrame);
-        return;
-    }
-
-    // 1. Draw frame to hidden canvas to read pixels
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    // 2. If we are scanning, analyze colors under the grid
-    if (isScanning) {
-        const detectedColors = scanGridColors();
+function scanLoop() {
+    if (video.readyState === video.HAVE_ENOUGH_DATA && isScanning) {
+        cvCtx.drawImage(video, 0, 0, cvCanvas.width, cvCanvas.height);
         
-        // 3. Update the 3D Cube LIVE to match what we see
-        update3DLivePreview(detectedColors);
+        // Analyze the 9 grid points
+        const colors = analyzeGrid();
+        
+        // Live Update the 3D Cube
+        update3DPreview(colors);
     }
-
-    requestAnimationFrame(processVideoFrame);
+    requestAnimationFrame(scanLoop);
 }
 
-function scanGridColors() {
-    // Grid geometry matches CSS (#scan-grid)
-    // We assume the grid is centered in the video frame
-    const size = Math.min(canvas.width, canvas.height) * 0.5; // Roughly the visual size
-    const startX = (canvas.width - size) / 2;
-    const startY = (canvas.height - size) / 2;
-    const cellSize = size / 3;
+function analyzeGrid() {
+    // Dynamic Grid sizing based on actual video resolution
+    const size = Math.min(cvCanvas.width, cvCanvas.height) * 0.5;
+    const startX = (cvCanvas.width - size) / 2;
+    const startY = (cvCanvas.height - size) / 2;
+    const step = size / 3;
 
-    let faceColors = [];
+    let detected = [];
 
-    for (let i = 0; i < 9; i++) {
-        const row = Math.floor(i / 3);
-        const col = i % 3;
-
-        // Sample Center of the cell
-        const x = Math.floor(startX + (col * cellSize) + (cellSize / 2));
-        const y = Math.floor(startY + (row * cellSize) + (cellSize / 2));
-
-        const pixel = ctx.getImageData(x, y, 1, 1).data;
-        const colorCode = classifyColor(pixel[0], pixel[1], pixel[2]);
-        faceColors.push(colorCode);
-    }
-    return faceColors;
-}
-
-// Convert RGB to Cube Color Code
-function classifyColor(r, g, b) {
-    // Simple Euclidean distance map
-    const map = [
-        { char: 'U', r: 255, g: 255, b: 255 }, // White
-        { char: 'D', r: 255, g: 255, b: 0 },   // Yellow
-        { char: 'R', r: 200, g: 0,   b: 0 },   // Red
-        { char: 'L', r: 255, g: 100, b: 0 },   // Orange
-        { char: 'F', r: 0,   g: 255, b: 0 },   // Green
-        { char: 'B', r: 0,   g: 0,   b: 255 }    // Blue
-    ];
-
-    let minDist = Infinity;
-    let match = 'U';
-
-    map.forEach(c => {
-        const dist = Math.sqrt((r-c.r)**2 + (g-c.g)**2 + (b-c.b)**2);
-        if (dist < minDist) {
-            minDist = dist;
-            match = c.char;
+    for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 3; col++) {
+            const x = Math.floor(startX + col * step + step / 2);
+            const y = Math.floor(startY + row * step + step / 2);
+            
+            // Get pixel data
+            const p = cvCtx.getImageData(x, y, 1, 1).data;
+            const colorChar = classifyColorHSV(p[0], p[1], p[2]);
+            detected.push(colorChar);
         }
-    });
-    return match;
+    }
+    return detected;
+}
+
+// ROBUST COLOR DETECTION (HSV)
+// Converts RGB to HSV and checks ranges
+function classifyColorHSV(r, g, b) {
+    // 1. Convert RGB to HSV
+    r /= 255, g /= 255, b /= 255;
+    let max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, v = max;
+    let d = max - min;
+    s = max == 0 ? 0 : d / max;
+
+    if (max == min) h = 0; 
+    else {
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+    
+    // HSV Ranges (0-360 hue is 0-1 here)
+    // Tune these if specific lighting fails
+    
+    // White: Low Saturation
+    if (s < 0.2 && v > 0.5) return 'U'; 
+    
+    // Yellow: High Val, Yellow Hue (~0.16)
+    if (h > 0.12 && h < 0.22) return 'D';
+    
+    // Orange: Low Hue (~0.08)
+    if (h > 0.02 && h < 0.12) return 'L';
+    
+    // Red: Very low or very high Hue
+    if (h <= 0.02 || h >= 0.95) return 'R';
+    
+    // Green: ~0.33
+    if (h > 0.22 && h < 0.45) return 'F';
+    
+    // Blue: ~0.66
+    if (h > 0.5 && h < 0.75) return 'B';
+
+    return 'U'; // Default fallback
 }
 
 // ==========================================
 // 3. 3D VISUALIZATION
 // ==========================================
 function init3D() {
-    const container = document.getElementById('three-canvas-container');
+    const container = document.getElementById('three-container');
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    scene.background = new THREE.Color(0x222222);
 
-    camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-    camera.position.set(0, 0, 6); // Look straight at the cube front
-    
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 100);
+    camera.position.set(0, 0, 5);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
 
-    // Create the Cube (27 cubies)
+    // Create 3x3x3 Cube Group
     cubeGroup = new THREE.Group();
-    const geometry = new THREE.BoxGeometry(0.95, 0.95, 0.95); // Gap between cubes
+    const geo = new THREE.BoxGeometry(0.92, 0.92, 0.92);
 
-    // We need to identify which mesh belongs to which face to update it dynamically
-    // Order of ThreeJS BoxGeometry materials: Right, Left, Top, Bottom, Front, Back
-    
-    // Create a logical map to access meshes by face index (0-8)
-    // We will build a helper structure: cubeFaceMap['F'][4] = (Mesh Object)
-    
-    // Simplified: Just build the group, we will paint it by raycasting or logical mapping
-    // Actually, logical mapping is better for the "solver" data structure.
-    
     for (let x = -1; x <= 1; x++) {
         for (let y = -1; y <= 1; y++) {
             for (let z = -1; z <= 1; z++) {
-                // Default grey material
-                const materials = Array(6).fill(null).map(() => new THREE.MeshBasicMaterial({ color: 0x333333 }));
-                const mesh = new THREE.Mesh(geometry, materials);
+                const mats = Array(6).fill(null).map(() => new THREE.MeshBasicMaterial({ color: 0x111111 }));
+                const mesh = new THREE.Mesh(geo, mats);
                 mesh.position.set(x, y, z);
-                mesh.userData = { x, y, z }; // Store logic position
+                mesh.userData = { x, y, z }; // Logical coordinates
                 cubeGroup.add(mesh);
-                cubeMeshes.push(mesh);
+                allCubies.push(mesh);
             }
         }
     }
-    
     scene.add(cubeGroup);
     
-    // Rotate slightly so we see 3D depth
-    cubeGroup.rotation.x = 0.5;
-    cubeGroup.rotation.y = 0.5;
+    // Add simple lighting just in case we switch materials
+    const light = new THREE.AmbientLight(0xffffff);
+    scene.add(light);
 
-    // Animation Loop
+    // Initial orientation
+    rotate3DToFace('U');
+
     function animate() {
         requestAnimationFrame(animate);
         renderer.render(scene, camera);
     }
     animate();
-    
-    // Initial Orientation (Show UP face)
-    rotateToFace('U');
 }
 
-// This is the Magic Function: Paints the 3D cube based on Camera Input
-function update3DLivePreview(detectedColors) {
-    const faceName = faceOrder[currentFaceIndex];
-    
-    // Update our internal state
-    cubeState[faceName] = detectedColors;
-
-    // Update 3D Meshes
-    // This logic maps the flat array (0-8) to the 3D coordinates (x,y,z)
-    // This is complex because "Front" changes based on rotation. 
-    // Simplified approach: We only paint the side facing the camera in the 3D view.
-    
-    // We need to know which 9 meshes correspond to the current face
-    const meshesToPaint = getMeshesForFace(faceName);
-    
-    detectedColors.forEach((colorCode, idx) => {
-        const hex = COLORS[colorCode];
-        const mesh = meshesToPaint[idx].mesh;
-        const matIndex = meshesToPaint[idx].matIndex;
-        mesh.material[matIndex].color.setHex(hex);
-    });
-}
-
-function getMeshesForFace(face) {
-    // Returns array of { mesh, matIndex } for the 9 cubies of a face
-    // Sorted top-left to bottom-right
-    let filtered = [];
-    
-    cubeMeshes.forEach(mesh => {
-        const { x, y, z } = mesh.userData;
-        
-        if (face === 'F' && z === 1) filtered.push({ mesh, matIndex: 4, x, y: -y }); // Invert Y for array order
-        if (face === 'B' && z === -1) filtered.push({ mesh, matIndex: 5, x: -x, y: -y });
-        if (face === 'U' && y === 1) filtered.push({ mesh, matIndex: 2, x, y: z }); // Map Z to Y for 2D sorting
-        if (face === 'D' && y === -1) filtered.push({ mesh, matIndex: 3, x, y: -z });
-        if (face === 'R' && x === 1) filtered.push({ mesh, matIndex: 0, x: -z, y: -y });
-        if (face === 'L' && x === -1) filtered.push({ mesh, matIndex: 1, x: z, y: -y });
-    });
-
-    // Sort to match the scanning order (Top-Left -> Bottom-Right)
-    filtered.sort((a, b) => {
-        if (a.y !== b.y) return a.y - b.y; // Row first
-        return a.x - b.x; // Then Col
-    });
-    
-    return filtered;
-}
-
-// ==========================================
-// 4. APP LOGIC (Scanning Steps)
-// ==========================================
-
-function nextFace() {
-    // User clicked "Capture". The current colors are already in cubeState (due to live preview).
-    // Just animate to the next face.
-    
-    currentFaceIndex++;
-    
-    if (currentFaceIndex < 6) {
-        const nextFaceName = faceOrder[currentFaceIndex];
-        document.getElementById('instruction').innerText = `SCAN: ${faceNames[currentFaceIndex]}`;
-        
-        // Rotate 3D cube to show the new face to be scanned
-        rotateToFace(nextFaceName);
-    } else {
-        // Scanning Done
-        isScanning = false;
-        document.getElementById('instruction').innerText = "SCAN COMPLETE";
-        document.getElementById('scan-btn').classList.add('hidden');
-        document.getElementById('solve-btn').classList.remove('hidden');
-    }
-}
-
-function rotateToFace(face) {
-    // GSAP would be better, but we'll snap for now or use simple lerp
-    // Reset rotation
+function rotate3DToFace(face) {
+    // Hard reset rotation then apply specific angle
     cubeGroup.rotation.set(0,0,0);
     
-    switch(face) {
-        case 'U': cubeGroup.rotation.x = 0.5; cubeGroup.rotation.y = 0.5; break; // Angled Top
-        case 'F': cubeGroup.rotation.set(0.2, 0, 0); break;
-        case 'R': cubeGroup.rotation.set(0.2, -1.5, 0); break;
-        case 'D': cubeGroup.rotation.set(-1.5, 0, 0); break; // Look from bottom
-        case 'L': cubeGroup.rotation.set(0.2, 1.5, 0); break;
-        case 'B': cubeGroup.rotation.set(0.2, 3.14, 0); break;
-    }
+    // These angles orient the cube so the selected face is front-center
+    const angles = {
+        'U': [0.5, 0.5, 0],     // Angled view of Top
+        'F': [0.2, 0, 0],       // Front
+        'R': [0.2, -1.6, 0],    // Right
+        'L': [0.2, 1.6, 0],     // Left
+        'B': [0.2, 3.14, 0],    // Back
+        'D': [-1.6, 0, 0]       // Bottom
+    };
+    
+    const [x, y, z] = angles[face];
+    
+    // Simple transition (could be tweened)
+    cubeGroup.rotation.set(x, y, z);
 }
 
-function solveCube() {
-    // Send cubeState to Worker (from previous answer)
-    // ... (Use the worker code provided previously) ...
-    // For visual demo, we just alert
-    alert("Sending to solver logic...");
+function update3DPreview(detectedColors) {
+    // Only paint the face we are currently looking at
+    // We need to find the 9 meshes corresponding to 'currentFace'
+    
+    // Map logical face to 3D normals
+    const faceNormalMap = {
+        'U': { axis: 'y', val: 1, matIdx: 2 },
+        'D': { axis: 'y', val: -1, matIdx: 3 },
+        'F': { axis: 'z', val: 1, matIdx: 4 },
+        'B': { axis: 'z', val: -1, matIdx: 5 },
+        'R': { axis: 'x', val: 1, matIdx: 0 },
+        'L': { axis: 'x', val: -1, matIdx: 1 }
+    };
+
+    const config = faceNormalMap[currentFace];
+    
+    // Filter cubies that are on this face
+    let faceCubies = allCubies.filter(c => c.userData[config.axis] === config.val);
+    
+    // Sort them Top-Left to Bottom-Right (Visual)
+    // This sorting depends on the face.
+    faceCubies.sort((a, b) => {
+        // This is a simplified sort for standard orientation
+        if (currentFace === 'U' || currentFace === 'D') return a.userData.x - b.userData.x || a.userData.z - b.userData.z;
+        return a.userData.x - b.userData.x || -a.userData.y + b.userData.y; 
+        // Note: A perfect generic sorter requires more logic, but this covers most standard holds.
+    });
+
+    detectedColors.forEach((color, idx) => {
+        if(faceCubies[idx]) {
+            faceCubies[idx].material[config.matIdx].color.setHex(COLORS[color].hex);
+        }
+    });
+}
+
+// ==========================================
+// 4. APP LOGIC & UI
+// ==========================================
+function setupUI() {
+    // Face Selectors
+    document.querySelectorAll('.face-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            currentFace = e.target.dataset.face;
+            
+            // UI Updates
+            document.querySelectorAll('.face-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            
+            document.getElementById('scan-feedback').innerText = "Align Face: " + COLORS[currentFace].name;
+            rotate3DToFace(currentFace);
+        });
+    });
+
+    // Capture Button
+    document.getElementById('capture-btn').addEventListener('click', () => {
+        // Save current preview to state
+        const detected = analyzeGrid(); // Get fresh read
+        cubeState[currentFace] = detected;
+        scannedFaces.add(currentFace);
+
+        // Mark UI as scanned
+        document.querySelector(`.face-btn[data-face="${currentFace}"]`).classList.add('scanned');
+
+        // Auto-advance logic (optional)
+        // ...
+
+        if (scannedFaces.size === 6) {
+            document.getElementById('solve-btn').classList.remove('hidden');
+            document.getElementById('capture-btn').classList.add('hidden');
+        }
+    });
+
+    // Solve Button
+    document.getElementById('solve-btn').addEventListener('click', runSolver);
+}
+
+function runSolver() {
+    isScanning = false; // Stop camera updates
+    
+    // Format string for Kociemba: U...R...F...D...L...B...
+    let faceStr = '';
+    FACE_ORDER.forEach(f => {
+        faceStr += cubeState[f].join('');
+    });
+
+    console.log("Solving:", faceStr);
+
+    // Call Worker (Assuming you have solver-worker.js)
+    const worker = new Worker('solver-worker.js');
+    worker.postMessage(faceStr);
+    
+    worker.onmessage = (e) => {
+        if(e.data.success) {
+            alert("Solution Found!");
+            showSolutionUI(e.data.solution);
+        } else {
+            alert("Cube Invalid! Check scans. " + e.data.error);
+        }
+    };
+}
+
+function showSolutionUI(solution) {
+    document.getElementById('actions').classList.add('hidden');
+    document.getElementById('solution-controls').classList.remove('hidden');
+    
+    const moves = solution.split(' ');
+    let idx = 0;
+    
+    document.getElementById('move-display').innerText = `Start (${moves.length} moves)`;
+    
+    document.getElementById('next-move').addEventListener('click', () => {
+        if(idx < moves.length) {
+            document.getElementById('move-display').innerText = moves[idx];
+            // Here you would add the rotation animation for the 3D cube
+            idx++;
+        } else {
+            document.getElementById('move-display').innerText = "DONE!";
+        }
+    });
 }
