@@ -7,19 +7,29 @@ Cube.initSolver(() => {
 
 
 function solve() {
-  const cube = cubeInput.value.trim();
+  if (!solverReady) {
+    alert("Solver is still initializing. Please wait 1 second.");
+    return;
+  }
 
-  if (cube.length !== 54) {
-    alert("Invalid cube string");
+  const cubeStr = document.getElementById("cubeInput").value.trim();
+
+  if (cubeStr.length !== 54) {
+    alert("Cube string must be exactly 54 characters");
     return;
   }
 
   try {
-    const result = min2phase.solve(cube);
-    document.getElementById("solution").innerText = result;
-    moves = result.split(" ");
+    const cube = Cube.fromString(cubeStr);
+    const solution = cube.solve();
+
+    document.getElementById("solution").innerText =
+      solution || "(Already Solved)";
+
+    moves = solution ? solution.split(" ") : [];
     currentMove = 0;
-  } catch {
+  } catch (e) {
     alert("Invalid cube");
+    console.error(e);
   }
 }
