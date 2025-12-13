@@ -7,7 +7,11 @@ Cube.initSolver(); // synchronous – must be called once
  * SOLVE BUTTON LOGIC
  ***********************/
 function solveCube() {
-  const input = document.getElementById("cubeInput").value.trim();
+  const input = document
+  .getElementById("cubeInput")
+  .value
+  .toUpperCase()
+  .replace(/\s+/g, "");
 
   if (!isValidInput(input)) {
     alert("Cube must contain exactly 9 of each: U R F D L B");
