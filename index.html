@@ -3,53 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Master Cube Solver</title>
+    <title>Pro Cube Solver</title>
     <link rel="stylesheet" href="styles.css">
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script async src="https://docs.opencv.org/4.5.4/opencv.js" onload="onOpenCvReady();"></script>
     <script src="https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/cube.min.js"></script>
 </head>
 <body>
 
     <div id="app">
-        <div id="camera-section">
+        <div id="scan-container">
             <video id="video-feed" autoplay playsinline muted></video>
-            <canvas id="hidden-canvas"></canvas>
             
-            <div id="overlay-guide">
-                <div class="grid-box">
-                    <div class="zone"></div><div class="zone"></div><div class="zone"></div>
-                    <div class="zone"></div><div class="zone center-zone"></div><div class="zone"></div>
-                    <div class="zone"></div><div class="zone"></div><div class="zone"></div>
-                </div>
+            <canvas id="vision-canvas"></canvas>
+            
+            <div id="grid-overlay">
+                <div class="grid-cell" id="cell-0" onclick="manualCorrect(0)"></div>
+                <div class="grid-cell" id="cell-1" onclick="manualCorrect(1)"></div>
+                <div class="grid-cell" id="cell-2" onclick="manualCorrect(2)"></div>
+                <div class="grid-cell" id="cell-3" onclick="manualCorrect(3)"></div>
+                <div class="grid-cell center-cell" id="cell-4"></div> <div class="grid-cell" id="cell-5" onclick="manualCorrect(5)"></div>
+                <div class="grid-cell" id="cell-6" onclick="manualCorrect(6)"></div>
+                <div class="grid-cell" id="cell-7" onclick="manualCorrect(7)"></div>
+                <div class="grid-cell" id="cell-8" onclick="manualCorrect(8)"></div>
             </div>
-            
-            <div id="status-pill">Align Center Sticker</div>
+
+            <div id="scan-instruction">Scan Center: <span id="target-color">WHITE</span></div>
+            <button id="mirror-toggle" class="icon-btn">⇄ Flip Cam</button>
         </div>
 
         <div id="dashboard">
             <div id="three-preview"></div>
             
             <div id="face-nav">
-                <button class="nav-btn" data-face="U" data-r="0.5,0">UP</button>
-                <button class="nav-btn" data-face="L" data-r="0,1.5">LT</button>
-                <button class="nav-btn active" data-face="F" data-r="0,0">FR</button>
-                <button class="nav-btn" data-face="R" data-r="0,-1.5">RT</button>
-                <button class="nav-btn" data-face="B" data-r="0,3.14">BK</button>
-                <button class="nav-btn" data-face="D" data-r="-0.5,0">DN</button>
+                <button class="nav-btn" data-face="U" onclick="selectFace('U')">UP</button>
+                <button class="nav-btn" data-face="L" onclick="selectFace('L')">LT</button>
+                <button class="nav-btn active" data-face="F" onclick="selectFace('F')">FR</button>
+                <button class="nav-btn" data-face="R" onclick="selectFace('R')">RT</button>
+                <button class="nav-btn" data-face="B" onclick="selectFace('B')">BK</button>
+                <button class="nav-btn" data-face="D" onclick="selectFace('D')">DN</button>
             </div>
 
-            <div id="action-area">
-                <button id="scan-btn" class="big-btn">SCAN FACE</button>
-                <button id="solve-btn" class="big-btn blue hidden">GET SOLUTION</button>
+            <div id="action-bar">
+                <button id="scan-btn" onclick="captureCurrentFace()">CAPTURE FACE</button>
+                <button id="solve-btn" class="hidden" onclick="solveCube()">SOLVE CUBE</button>
             </div>
-            
-            <div id="solution-step" class="hidden">
-                <button id="prev">PREV</button>
-                <div id="move-text">READY</div>
-                <button id="next">NEXT</button>
+        </div>
+    </div>
+
+    <div id="solution-overlay" class="hidden">
+        <div class="sol-card">
+            <h2>Solution Found</h2>
+            <div id="move-display">Ready</div>
+            <div class="sol-controls">
+                <button onclick="prevMove()">Prev</button>
+                <button onclick="nextMove()">Next</button>
             </div>
+            <button class="close-btn" onclick="location.reload()">New Scan</button>
         </div>
     </div>
 
