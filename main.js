@@ -1,4 +1,10 @@
-Cube.initSolver();
+let solverReady = false;
+
+Cube.initSolver(() => {
+  solverReady = true;
+  console.log("Cube solver ready");
+});
+
 
 function solve() {
   const cube = cubeInput.value.trim();
