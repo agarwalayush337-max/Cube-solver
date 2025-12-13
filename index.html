@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pro Cube Solver</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Master Cube Solver</title>
     <link rel="stylesheet" href="styles.css">
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -12,44 +12,43 @@
 </head>
 <body>
 
-    <div id="loader">
-        <div class="spinner"></div>
-        <p>Loading Vision Engine...</p>
-    </div>
-
-    <div id="app-container">
-        
-        <div id="scanner-view">
+    <div id="app">
+        <div id="camera-section">
             <video id="video-feed" autoplay playsinline muted></video>
-            <canvas id="processing-canvas"></canvas> <div id="reticle">
-                <div class="cell" id="c0"></div><div class="cell" id="c1"></div><div class="cell" id="c2"></div>
-                <div class="cell" id="c3"></div><div class="cell" id="c4"></div><div class="cell" id="c5"></div>
-                <div class="cell" id="c6"></div><div class="cell" id="c7"></div><div class="cell" id="c8"></div>
+            <canvas id="hidden-canvas"></canvas>
+            
+            <div id="overlay-guide">
+                <div class="grid-box">
+                    <div class="zone"></div><div class="zone"></div><div class="zone"></div>
+                    <div class="zone"></div><div class="zone center-zone"></div><div class="zone"></div>
+                    <div class="zone"></div><div class="zone"></div><div class="zone"></div>
+                </div>
             </div>
-
-            <div id="scan-feedback">Align Face</div>
+            
+            <div id="status-pill">Align Center Sticker</div>
         </div>
 
-        <div id="control-deck">
-            <div id="face-selector">
-                <button data-face="U" class="face-btn active">UP</button>
-                <button data-face="R" class="face-btn">RT</button>
-                <button data-face="F" class="face-btn">FR</button>
-                <button data-face="D" class="face-btn">DN</button>
-                <button data-face="L" class="face-btn">LT</button>
-                <button data-face="B" class="face-btn">BK</button>
+        <div id="dashboard">
+            <div id="three-preview"></div>
+            
+            <div id="face-nav">
+                <button class="nav-btn" data-face="U" data-r="0.5,0">UP</button>
+                <button class="nav-btn" data-face="L" data-r="0,1.5">LT</button>
+                <button class="nav-btn active" data-face="F" data-r="0,0">FR</button>
+                <button class="nav-btn" data-face="R" data-r="0,-1.5">RT</button>
+                <button class="nav-btn" data-face="B" data-r="0,3.14">BK</button>
+                <button class="nav-btn" data-face="D" data-r="-0.5,0">DN</button>
             </div>
 
-            <div id="three-container"></div>
-
-            <div id="actions">
-                <button id="capture-btn" class="primary-btn">CAPTURE FACE</button>
-                <button id="solve-btn" class="hidden solve-btn">SOLVE CUBE</button>
+            <div id="action-area">
+                <button id="scan-btn" class="big-btn">SCAN FACE</button>
+                <button id="solve-btn" class="big-btn blue hidden">GET SOLUTION</button>
             </div>
-            <div id="solution-controls" class="hidden">
-                <button id="prev-move">←</button>
-                <span id="move-display">Ready</span>
-                <button id="next-move">→</button>
+            
+            <div id="solution-step" class="hidden">
+                <button id="prev">PREV</button>
+                <div id="move-text">READY</div>
+                <button id="next">NEXT</button>
             </div>
         </div>
     </div>
