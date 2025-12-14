@@ -1,42 +1,51 @@
 // worker.js
-// 1. Load the library
-importScripts('solver.js');
+importScripts('solver.js'); 
 
-// 2. Start Initialization IMMEDIATELY
-// This calculation takes time (30s - 3mins on mobile)
-// We do it here so the main screen doesn't freeze.
 let isReady = false;
 
+// 1. Initialize the Fast Engine
 try {
-    if (typeof cubeSolver !== 'undefined') {
-        // Initialize the Kociemba algorithm tables
-        cubeSolver.initialize('kociemba'); 
-        isReady = true;
-        
-        // Notify the main page that we are ready
-        self.postMessage({ type: 'status', text: 'ready' });
-    }
+    // min2phase.initTables() is very fast
+    min2phase.initTables();
+    isReady = true;
+    self.postMessage({ type: 'status', text: 'ready' });
 } catch (e) {
-    self.postMessage({ type: 'error', message: "Init failed: " + e.message });
+    self.postMessage({ type: 'error', message: "Init failed: " + e });
 }
 
-// 3. Listen for "Solve" commands
+// 2. Listen for Solve Request
 self.onmessage = function(e) {
     const stateString = e.data;
 
     if (!isReady) {
-        self.postMessage({ type: 'error', message: 'Engine is still warming up! Please wait 30 seconds and try again.' });
+        self.postMessage({ type: 'error', message: 'Engine not ready yet.' });
         return;
     }
 
     try {
-        // The solver is already initialized, so this should be FAST now (0.1s)
-        const result = cubeSolver.solve(stateString, 'kociemba');
+        // Validate Color Counts (9 of each)
+        const counts = {};
+        for (let char of stateString) counts[char] = (counts[char] || 0) + 1;
+        for (let c of ['U','R','F','D','L','B']) {
+            if (counts[c] !== 9) throw new Error(`Invalid Cube! Found ${counts[c] || 0} '${c}' stickers. Must be 9.`);
+        }
+
+        // SOLVE!
+        // min2phase returns a string immediately
+        const search = new min2phase.Search();
         
-        if (result === null) {
-            self.postMessage({ type: 'error', message: 'Unsolvable State. Check your colors.' });
+        // Arguments: state, maxDepth, probeMax, probeMin, verbose
+        const solution = search.solution(stateString, 21, 100000000, 0, 0);
+
+        if (!solution) {
+            // Check if it's already solved
+             if(stateString === "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB") {
+                 self.postMessage({ type: 'solution', solution: "" }); // Empty string = solved
+             } else {
+                 self.postMessage({ type: 'error', message: 'Unsolvable State. Check your colors.' });
+             }
         } else {
-            self.postMessage({ type: 'solution', solution: result });
+            self.postMessage({ type: 'solution', solution: solution });
         }
 
     } catch (err) {
