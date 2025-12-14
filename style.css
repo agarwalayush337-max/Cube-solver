@@ -6,27 +6,27 @@ body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Seg
     background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
     padding: 20px 0; text-align: center; pointer-events: none;
 }
-.palette { display: inline-flex; gap: 10px; pointer-events: auto; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 20px; }
+.palette { display: inline-flex; gap: 15px; pointer-events: auto; background: rgba(0,0,0,0.6); padding: 10px 20px; border-radius: 30px; }
 .swatch {
-    width: 35px; height: 35px; border-radius: 50%; cursor: pointer;
-    border: 3px solid transparent; transition: transform 0.2s;
+    width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+    border: 3px solid #333; transition: transform 0.2s, border-color 0.2s;
 }
-.swatch.selected { border-color: white; transform: scale(1.2); box-shadow: 0 0 10px white; }
+.swatch.selected { border-color: #fff; transform: scale(1.2); box-shadow: 0 0 15px rgba(255,255,255,0.5); }
 
-#instruction { color: #ccc; margin-top: 10px; font-size: 14px; text-shadow: 0 1px 2px black; }
+#instruction { color: #aaa; margin-top: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
 
 #ui-bottom {
     position: absolute; bottom: 0; left: 0; width: 100%;
     background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
     padding: 30px 0; text-align: center; pointer-events: none;
 }
-#status { color: #00ff00; font-family: monospace; margin-bottom: 15px; font-size: 16px; }
+#status { color: #00ff00; font-family: monospace; margin-bottom: 20px; font-size: 18px; text-shadow: 0 0 5px #00ff00; }
 
-.controls, #playback-controls { pointer-events: auto; display: flex; justify-content: center; gap: 15px; }
+.controls, #playback-controls { pointer-events: auto; display: flex; justify-content: center; gap: 20px; }
 .btn {
     background: #333; color: white; border: 1px solid #555;
-    padding: 10px 25px; border-radius: 5px; font-weight: bold; cursor: pointer;
-    text-transform: uppercase; letter-spacing: 1px;
+    padding: 12px 30px; border-radius: 8px; font-weight: bold; cursor: pointer;
+    text-transform: uppercase; font-size: 14px;
 }
-.solve-btn { background: #009E60; border-color: #009E60; }
+.solve-btn { background: #009E60; border-color: #009E60; color: #fff; }
 .btn:active { transform: scale(0.95); }
