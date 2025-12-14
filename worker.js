@@ -3,14 +3,18 @@ importScripts('solver.js');
 
 let isReady = false;
 
-// 1. Initialize the Fast Engine
+// 1. Initialize the Fast Engine (min2phase)
 try {
-    // min2phase.initTables() is very fast
-    min2phase.initTables();
-    isReady = true;
-    self.postMessage({ type: 'status', text: 'ready' });
+    if (typeof min2phase !== 'undefined') {
+        // This builds the lookup tables (approx 0.1s)
+        min2phase.initTables();
+        isReady = true;
+        self.postMessage({ type: 'status', text: 'ready' });
+    } else {
+        throw new Error("min2phase library not found in solver.js");
+    }
 } catch (e) {
-    self.postMessage({ type: 'error', message: "Init failed: " + e });
+    self.postMessage({ type: 'error', message: "Init failed: " + e.message });
 }
 
 // 2. Listen for Solve Request
@@ -18,34 +22,31 @@ self.onmessage = function(e) {
     const stateString = e.data;
 
     if (!isReady) {
-        self.postMessage({ type: 'error', message: 'Engine not ready yet.' });
+        self.postMessage({ type: 'error', message: 'Engine loading...' });
         return;
     }
 
     try {
-        // Validate Color Counts (9 of each)
+        // Basic validation: 9 stickers of each color
         const counts = {};
         for (let char of stateString) counts[char] = (counts[char] || 0) + 1;
         for (let c of ['U','R','F','D','L','B']) {
             if (counts[c] !== 9) throw new Error(`Invalid Cube! Found ${counts[c] || 0} '${c}' stickers. Must be 9.`);
         }
 
-        // SOLVE!
-        // min2phase returns a string immediately
+        // Run the Solver
+        // solution(facelets, maxDepth, probeMax, probeMin, verbose)
         const search = new min2phase.Search();
-        
-        // Arguments: state, maxDepth, probeMax, probeMin, verbose
-        const solution = search.solution(stateString, 21, 100000000, 0, 0);
+        const result = search.solution(stateString, 21, 100000000, 0, 0);
 
-        if (!solution) {
-            // Check if it's already solved
-             if(stateString === "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB") {
-                 self.postMessage({ type: 'solution', solution: "" }); // Empty string = solved
-             } else {
-                 self.postMessage({ type: 'error', message: 'Unsolvable State. Check your colors.' });
-             }
+        // Check results
+        if (!result && result !== "") {
+             // If result is null/false, it's unsolvable
+             self.postMessage({ type: 'error', message: 'Unsolvable State. Check your colors.' });
         } else {
-            self.postMessage({ type: 'solution', solution: solution });
+             // Returns a string like "R2 U F'..."
+             // If string is empty "", it is already solved.
+             self.postMessage({ type: 'solution', solution: result });
         }
 
     } catch (err) {
