@@ -1,42 +1,43 @@
 // worker.js
-// Load the solver library we saved earlier
+// 1. Load the library
 importScripts('solver.js');
 
+// 2. Start Initialization IMMEDIATELY
+// This calculation takes time (30s - 3mins on mobile)
+// We do it here so the main screen doesn't freeze.
 let isReady = false;
 
-// 1. Initialize the Brain immediately
-if (typeof Cube !== 'undefined') {
-    Cube.initSolver(); // This is the slow part! We do it here.
-    isReady = true;
-    self.postMessage({ type: 'status', text: 'Ready' });
+try {
+    if (typeof cubeSolver !== 'undefined') {
+        // Initialize the Kociemba algorithm tables
+        cubeSolver.initialize('kociemba'); 
+        isReady = true;
+        
+        // Notify the main page that we are ready
+        self.postMessage({ type: 'status', text: 'ready' });
+    }
+} catch (e) {
+    self.postMessage({ type: 'error', message: "Init failed: " + e.message });
 }
 
-// 2. Listen for "Solve" commands
+// 3. Listen for "Solve" commands
 self.onmessage = function(e) {
     const stateString = e.data;
 
     if (!isReady) {
-        self.postMessage({ type: 'error', message: 'System is still warming up. Wait 2 seconds.' });
+        self.postMessage({ type: 'error', message: 'Engine is still warming up! Please wait 30 seconds and try again.' });
         return;
     }
 
     try {
-        // Validate Color Counts first (Fail Fast)
-        const counts = {};
-        for (let char of stateString) counts[char] = (counts[char] || 0) + 1;
+        // The solver is already initialized, so this should be FAST now (0.1s)
+        const result = cubeSolver.solve(stateString, 'kociemba');
         
-        // Basic check: Each color must appear 9 times
-        for (let c of ['U','R','F','D','L','B']) {
-            if (counts[c] !== 9) {
-                throw new Error(`Invalid Cube! Found ${counts[c] || 0} '${c}' stickers. Must be exactly 9.`);
-            }
+        if (result === null) {
+            self.postMessage({ type: 'error', message: 'Unsolvable State. Check your colors.' });
+        } else {
+            self.postMessage({ type: 'solution', solution: result });
         }
-
-        // Run Solver
-        const cube = Cube.fromString(stateString);
-        const result = cube.solve(); // This is usually instant now
-
-        self.postMessage({ type: 'solution', solution: result });
 
     } catch (err) {
         self.postMessage({ type: 'error', message: err.message });
