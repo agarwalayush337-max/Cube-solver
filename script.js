@@ -40,18 +40,18 @@ solverWorker.onmessage = function(e) {
     else if (data.type === 'solution') {
         let result = data.solution;
         
-        // Handle Empty Result (Already Solved)
-        if (result === undefined || result === null) {
-             statusEl.innerText = "Error / Unsolvable";
-             statusEl.style.color = "red";
-        } else if (result.trim() === "") {
-             statusEl.innerText = "Already Solved!";
-             statusEl.style.color = "#00ff00";
+        // Handle "Already Solved" (empty string)
+        if (typeof result === 'string' && result.trim() === "") {
+             if(getCubeStateString() === "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB") {
+                 statusEl.innerText = "Already Solved!";
+                 statusEl.style.color = "#00ff00";
+             } else {
+                 statusEl.innerText = "Error: Invalid/Unsolvable";
+                 statusEl.style.color = "red";
+             }
         } else {
-            // Clean up solution string
             result = result.trim();
             const movesCount = result.split(/\s+/).length;
-            
             statusEl.innerHTML = `SOLVED! (${movesCount} moves)`;
             statusEl.style.color = "#00ff00";
             
@@ -70,7 +70,7 @@ init();
 animate();
 
 // ==========================================
-// 2. 3D SCENE & INTERACTION
+// 2. SCENE SETUP
 // ==========================================
 function init() {
     const container = document.getElementById('canvas-container');
@@ -143,6 +143,7 @@ function handlePaintClick(x, y) {
     }
 }
 
+// Input Handlers
 function onMouseDown(e){isMouseDown=true;isDragging=false;previousMousePosition={x:e.clientX,y:e.clientY}}
 function onMouseMove(e){if(!isMouseDown)return;const d={x:e.clientX-previousMousePosition.x,y:e.clientY-previousMousePosition.y};if(Math.abs(d.x)>2||Math.abs(d.y)>2)isDragging=true;if(isDragging){pivotGroup.rotation.y+=d.x*0.005;pivotGroup.rotation.x+=d.y*0.005}previousMousePosition={x:e.clientX,y:e.clientY}}
 function onMouseUp(e){isMouseDown=false;if(!isDragging)handlePaintClick(e.clientX,e.clientY);isDragging=false}
@@ -151,7 +152,7 @@ function onTouchMove(e){if(!isMouseDown)return;const d={x:e.touches[0].clientX-p
 function onTouchEnd(e){isMouseDown=false;if(!isDragging&&e.changedTouches.length>0)handlePaintClick(e.changedTouches[0].clientX,e.changedTouches[0].clientY)}
 
 // ==========================================
-// 3. SOLVE LOGIC
+// 3. STATE CAPTURE & SOLVE
 // ==========================================
 function getCubeStateString() {
     let state = "";
@@ -176,7 +177,7 @@ function solveCube() {
     console.log("Captured:", stateString);
     
     if (!engineReady) {
-        alert("Engine loading... wait 1 second.");
+        alert("Engine is still loading! Wait a moment.");
         return;
     }
     
