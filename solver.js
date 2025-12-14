@@ -1,2 +1,1313 @@
-/* min2phase.js - Fast Kociemba Solver */
-!function(t){"use strict";var o,n,s,e,u,r,f,i,a,h,c,l,v,d,b,p,m,y,w,g,_,x,M,S,j,P,A,B,C,k,E,T,D,I,O,U,L,R,F;function G(t,o,n){for(var s=0,e=0,u=n-1;0<=u;u--)s=t[e=o[u]]+n*s,t.splice(e,1);return s}function H(t,o,n,s){for(var e=new Array(n),u=0,r=0;r<n;r++){for(var f=t%s,i=n-1-r;0<=i;){if(u>>>i&1)i--;else{if(0==f)break;f--,i--}}e[i]=o[r],u|=1<<i,t=(t-f)/s,s--}return e}function J(t,o,n,s){for(var e=new Array(n),u=0;u<n;u++)e[u]=t[u];for(u=0;u<s;u++){var r=e[o+u],f=e[n-1-u];e[o+u]=f,e[n-1-u]=r}return e}function K(t,o){var n=t>>>3,s=t&7,e=o>>>3,u=o&7;return 5<=n&&5<=e&&n!=e&&Math.abs(n-e)!=3?1:0}function N(t){return t.replace(/\s+/g,"")}function Q(t){for(var o=0;o<t.length;o++)if(0<=t[o]&&t[o]<18)return 1;return 0}o=0,n=1,s=2,e=3,u=4,r=5,f=0,i=1,a=2,h=3,c=4,l=5,v=6,d=7,b=0,p=1,m=2,y=3,w=4,g=5,_=6,x=7,M=8,S=9,j=10,P=11,A=[1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],B=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1],C=[0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],k=new Array(24),E=new Array(24),T=new Array(24),D=new Array(24),I=new Array(18),O=new Array(18),U=new Array(18),L=new Array(18),R=new Array(18),F=new Array(18),function(){for(var t=[[u,r,f,i,a,h],[i,a,h,u,r,f],[f,u,r,h,i,a]],o=0;o<3;o++){k[o]=t[o][0],E[o]=t[o][1],T[o]=t[o][2],D[o]=t[o][3],k[o+3]=t[o][4],E[o+3]=t[o][5],T[o+3]=t[o][3],D[o+3]=t[o][2],k[o+6]=t[o][0],E[o+6]=t[o][4],T[o+6]=t[o][5],D[o+6]=t[o][1],k[o+9]=t[o][2],E[o+9]=t[o][0],T[o+9]=t[o][1],D[o+9]=t[o][3],k[o+12]=t[o][3],E[o+12]=t[o][2],T[o+12]=t[o][5],D[o+12]=t[o][4],k[o+15]=t[o][1],E[o+15]=t[o][0],T[o+15]=t[o][4],D[o+15]=t[o][5],k[o+18]=t[o][5],E[o+18]=t[o][4],T[o+18]=t[o][2],D[o+18]=t[o][3],k[o+21]=t[o][4],E[o+21]=t[o][5],T[o+21]=t[o][3],D[o+21]=t[o][0]}for(var n=0;n<18;n++){I[n]=k[Math.floor(n/3)],O[n]=E[Math.floor(n/3)],U[n]=T[Math.floor(n/3)],L[n]=D[Math.floor(n/3)],R[n]=n%3==1,F[n]=n%3==2}}();var W=function(){function t(){this.cp=new Array(8),this.co=new Array(8),this.ep=new Array(12),this.eo=new Array(12)}return t}();function V(t,o,n){for(var s=0;s<8;s++)n.cp[s]=t.cp[o.cp[s]],n.co[s]=(t.co[o.cp[s]]+o.co[s])%3;for(s=0;s<12;s++)n.ep[s]=t.ep[o.ep[s]],n.eo[s]=(t.eo[o.ep[s]]+o.eo[s])%2}function Z(t,o,n){for(var s=0;s<8;s++)n.cp[s]=t.cp[o.cp[s]],n.co[s]=(t.co[o.cp[s]]+o.co[s])%3;for(s=0;s<12;s++)n.ep[s]=t.ep[o.ep[s]],n.eo[s]=(t.eo[o.ep[s]]+o.eo[s])%2}function $(t){for(var o=0;o<8;o++)t.co[o]=(t.co[o]+2)%3;for(o=0;o<12;o++)t.eo[o]=(t.eo[o]+1)%2}function q(t,o,n,s,e,u,r,f,i,a){var h=new W;return h.cp[0]=t,h.cp[1]=o,h.cp[2]=n,h.cp[3]=s,h.cp[4]=e,h.cp[5]=u,h.cp[6]=r,h.cp[7]=f,h.co[0]=i,h.co[1]=a,h.co[2]=a,h.co[3]=i,h.co[4]=a,h.co[5]=i,h.co[6]=i,h.co[7]=a,h}function z(t,o,n,s,e,u,r,f,i,a,h,c,l,v){var d=new W;return d.ep[0]=t,d.ep[1]=o,d.ep[2]=n,d.ep[3]=s,d.ep[4]=e,d.ep[5]=u,d.ep[6]=r,d.ep[7]=f,d.ep[8]=i,d.ep[9]=a,d.ep[10]=h,d.ep[11]=c,d.eo[0]=l,d.eo[1]=v,d.eo[2]=l,d.eo[3]=v,d.eo[4]=l,d.eo[5]=v,d.eo[6]=l,d.eo[7]=v,d.eo[8]=l,d.eo[9]=v,d.eo[10]=l,d.eo[11]=v,d}var X=new Array(6),Y=new Array(6);!function(){X[0]=q(3,0,1,2,4,5,6,7,0,0),X[1]=q(0,1,2,3,5,6,7,4,0,0),X[2]=q(0,6,1,3,4,5,2,7,0,1),X[3]=q(0,1,2,3,4,5,6,7,0,0),X[4]=q(0,1,2,3,4,5,6,7,0,0),X[5]=q(0,1,2,3,4,5,6,7,0,0),Y[0]=z(0,1,2,3,4,5,6,7,8,9,10,11,0,0),Y[1]=z(0,1,2,3,5,6,7,4,8,9,10,11,0,0),Y[2]=z(0,1,10,3,4,5,9,7,8,2,6,11,1,1),Y[3]=z(0,1,2,3,4,5,6,7,8,9,10,11,0,0),Y[4]=z(0,1,2,3,4,5,6,7,8,9,10,11,0,0),Y[5]=z(0,1,2,3,4,5,6,7,8,9,10,11,0,0);for(var t=0;t<6;t++)V(X[t],Y[t],X[t]);for(var o=new W,n=0;n<6;n++){for(var s=0;s<8;s++)o.cp[s]=X[n].cp[s],o.co[s]=X[n].co[s];for(s=0;s<12;s++)o.ep[s]=X[n].ep[s],o.eo[s]=X[n].eo[s];for(var e=0;e<2;e++)V(X[n],o,o),V(X[n],o,X[n])}}();var tt=function(){function t(){this.twist=0,this.tsym=0,this.flip=0,this.fsym=0,this.slice=0,this.prun=0}return t}(),ot=new Array(18);!function(){for(var t=new W,o=0;o<18;o++){ot[o]=new tt;for(var n=0;n<8;n++)t.cp[n]=n,t.co[n]=0;for(n=0;n<12;n++)t.ep[n]=n,t.eo[n]=0;for(var s=Math.floor(o/3),e=o%3,u=0;u<=e;u++)V(t,X[s],t);ot[o].twist=function(t){for(var o=0,n=0;n<7;n++)o=3*o+t[n];return o}(t.co),ot[o].flip=function(t){for(var o=0,n=0;n<11;n++)o=2*o+t[n];return o}(t.eo),ot[o].slice=function(t){for(var o=0,n=0,s=11;0<=s;s--)8<=t[s]&&(o+=n=(11-s-n)*(n+1)/2,n++);return o}(t.ep)}}();var nt=new Array(18);!function(){for(var t=new W,o=0;o<18;o++){nt[o]=new tt;for(var n=0;n<8;n++)t.cp[n]=n,t.co[n]=0;for(n=0;n<12;n++)t.ep[n]=n,t.eo[n]=0;for(var s=Math.floor(o/3),e=o%3,u=0;u<=e;u++)V(t,X[s],t);nt[o].twist=function(t){for(var o=0,n=0,s=6;0<=s;s--)o+=G(t,n,s+1)*(n=function(t){for(var o=1,n=1;n<=t;n++)o*=n;return o}(s+1));return o}(t.cp),nt[o].flip=function(t){for(var o=0,n=0,s=11;0<=s;s--)8<=t[s]&&(o+=n=(11-s-n)*(n+1)/2,n++);return o}(t.ep),nt[o].slice=function(t){for(var o=0,n=0,s=11;0<=s;s--)t[s]<=3&&(o+=n=(11-s-n)*(n+1)/2,n++);return o}(t.ep)}}();var st=new Int8Array(324),et=new Uint16Array(324),ut=new Uint16Array(336),rt=new Int8Array(336);function ft(t,o){for(var n=0;n<8;n++){var s=t&7;if(3!=s){var e=o>>2*s&3;return s+=(3-e)%3,(t&=~(7<<3*n))|s<<3*n}t>>=3}return t}function it(t,o,n,s){for(var e=0,u=0;u<n;u++){var r=t&1;t>>=1,s[u]=r,e+=r}var f=0,i=0;for(u=11;0<=u;u--)if(e<=11-u)s[u]=o%2,o>>=1,f+=s[u],i+=s[u]*Math.pow(2,u-8);else{if(s[u]=0,!(f<e))break;f++}return i}function at(t,o,n,s){for(var e=0,u=0;u<n;u++){var r=t&1;t>>=1,s[u]=r,e+=r}var f=0,i=0;for(u=0;u<12;u++)if(e<=11-u)s[u]=o%2,o>>=1,f+=s[u],i+=s[u]*Math.pow(2,u);else{if(s[u]=0,!(f<e))break;f++}return i}function ht(){var t,o,n=new W;for(t=0;t<8;t++)n.cp[t]=t;for(t=0;t<12;t++)n.ep[t]=t;for(t=0;t<16;t++){for(var s=new W,e=0;e<8;e++)s.cp[e]=n.cp[B[e^t]];for(e=0;e<12;e++)s.ep[e]=n.ep[C[e^t]];var u=st[16*ft(0,t)+t],r=function(t){for(var o=0,n=0,s=6;0<=s;s--)o+=G(t,n,s+1)*(n=function(t){for(var o=1,n=1;n<=t;n++)o*=n;return o}(s+1));return o}(s.cp);for(et[16*r+u]=t,o=0;o<16;o++)ut[16*r+o]=function(t,o){var n=new W;for(var s=0;s<8;s++)n.cp[s]=t.cp[o.cp[s]],n.co[s]=t.co[o.cp[s]];for(s=0;s<12;s++)n.ep[s]=t.ep[o.ep[s]],n.eo[s]=t.eo[o.ep[s]];return n}(s,function(t){for(var o=new W,n=0;n<8;n++)o.cp[n]=n;for(n=0;n<12;n++)o.ep[n]=n;for(var s=0;s<16;s++){var e=new W;for(n=0;n<8;n++)e.cp[n]=o.cp[B[n^s]];for(n=0;n<12;n++)e.ep[n]=o.ep[C[n^s]];if(function(t){for(var o=0,n=0,s=6;0<=s;s--)o+=G(t,n,s+1)*(n=function(t){for(var o=1,n=1;n<=t;n++)o*=n;return o}(s+1));return o}(e.cp)==t)return e}}(function(t){for(var o=0,n=0;n<7;n++)o=3*o+t[n];return o}(function(t,o){var n=new Array(8);return H(t,n,8,3),n}(0,t)))).co[0],rt[16*r+o]=st[16*ft(0,o)+t]}}!function(){for(var t=new W,o=0;o<8;o++)t.cp[o]=o;for(o=0;o<12;o++)t.ep[o]=o;for(o=0;o<16;o++){for(var n=new W,s=0;s<8;s++)n.cp[s]=t.cp[B[s^o]];for(s=0;s<12;s++)n.ep[s]=t.ep[C[s^o]];st[16*ft(0,o)+o]=function(t){for(var o=0,n=0,s=6;0<=s;s--)o+=G(t,n,s+1)*(n=function(t){for(var o=1,n=1;n<=t;n++)o*=n;return o}(s+1));return o}(n.cp)}}(),ht();var ct,lt,vt=null,dt=null,bt=null,pt=null,mt=null,yt=null,wt=null,gt=null,_t=null,xt=null,Mt=null,St=null,jt=null,Pt=null,At=null,Bt=new Int8Array(324),Ct=new Uint16Array(40320),kt=new Uint16Array(40320);function Et(t,o,n){var s,e,u,r,f,i,a=t.length,h=o.length,c=new Uint8Array(h*a);for(s=0;s<h;s++)for(e=0;e<a;e++)c[s*a+e]=255;for(s=0;s<n;s++)c[s*a]=0;var l=1,v=0;for(s=0;s<n;s++)for(e=0;e<a;e++)if(0==c[s*a+e])for(u=0;u<18;u++){var d=t[e][u],b=o[s][u],p=d&1023,m=d>>10;if(255==c[b*a+p]){if(c[b*a+p]=m^rt[16*l+ut[16*l+v]],v++,16==v&&(v=0,l++),l==n)return c;}}}function Tt(t,o){var n,s,e,u,r=t.length,f=new Int8Array(r);for(n=0;n<r;n++)f[n]=-1;f[o]=0;var i=0,a=1;for(n=0;n<r;n++)if(0==f[n])for(s=0;s<18;s++){var h=t[n][s];if(-1==f[h]){if(f[h]=1,i++,15==i&&(i=0,a++),a==16)return f;}}}function Dt(t,o){var n=t.length,s=new Int8Array(n/2);for(var e=0;e<n/2;e++)s[e]=-1;s[o>>1]=15^(o&1);var u=0,r=1;for(var e=0;e<n/2;e++){var f=s[e];if(-1!=f)for(var i=0;i<2;i++)if((f>>4*i&15)==(15^i))for(var a=0;a<18;a++){var h=t[(e<<1|i)][a],c=h>>1;if(s[c]==-1)s[c]=15^(h&1)<<4*(15^(h&1)^(1^i));else{var l=s[c];if((l>>4*(h&1)&15)==15)s[c]=l^(15^(h&1)^(1^i))<<4*(h&1);else if(u++,15==u&&(u=0,r++),r==16)return s}}}}function It(t,o,n){var s=t.length,e=new Int8Array(s/2);for(var u=0;u<s/2;u++)e[u]=-1;e[o>>1]=15^(o&1)<<4;var r=0,f=1;for(var u=0;u<s/2;u++){var i=e[u];if(-1!=i)for(var a=0;a<2;a++)if((i>>4*a&15)==(15^a))for(var h=0;h<18;h++){var c=t[u<<1|a][h],l=c>>1;if(e[l]==-1)e[l]=15^(c&1)<<4;else{var v=e[l];if((v>>4*(c&1)&15)==15)e[l]=v^(15^(c&1)^(1^a))<<4*(c&1);else if(r++,15==r&&(r=0,f++),f==16)return e}}}return e}var Ot=function(){function t(){this.init()}return t.prototype.init=function(){if(!ct){for(var t=0;t<324;t++)Bt[t]=-1;Bt[0]=0;for(var o=0;o<18;o++)Bt[ot[o].twist+16*ot[o].tsym]=1;for(var n=0;n<324;n++)if(0==Bt[n])for(o=0;o<18;o++){var s=st[n<<4|ot[o].tsym],e=ot[o].twist;if(-1==Bt[s+16*e]&&(Bt[s+16*e]=1,n<16))for(var u=0;u<2768;u++)if(u!=n&&0==Bt[u])for(var r=0;r<18;r++){var f=st[u<<4|ot[r].tsym],i=ot[r].twist;if(f+16*i==s+16*e){Bt[u]=1;break}}}ct=new Uint16Array(114688),lt=new Uint32Array(57344);for(var a=0;a<2187;a++)for(var h=0;h<16;h++){var c=st[16*a+h];Ct[16*a+et[c]]=c,kt[16*a+c]=et[c]}for(var l=0;l<2688;l++)ct[l]=l;for(var v=new Array(2187),d=0;d<2187;d++){v[d]=new Uint16Array(18);for(var b=0;b<18;b++){var p=st[d<<4|ot[b].tsym],m=ot[b].twist;v[d][b]=p+16*m}}vt=Et(v,function(){for(var t=new Array(495),o=0;o<495;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=ot[n].slice;t[o][n]=s}}return t}(),168),dt=function(t,o,n){var s,e,u,r,f,i,a=t.length,h=o.length,c=new Uint32Array(h*a);for(s=0;s<h;s++)for(e=0;e<a;e++)c[s*a+e]=4294967295;for(s=0;s<n;s++)c[s*a]=0;var l=1,v=0;for(s=0;s<n;s++)for(e=0;e<a;e++)if(0==c[s*a+e])for(u=0;u<18;u++){var d=t[e][u],b=o[s][u],p=d&1023,m=d>>10;if(4294967295==c[b*a+p]){if(c[b*a+p]=m^rt[16*l+ut[16*l+v]],v++,16==v&&(v=0,l++),l==n)return c;}}}(v,function(){for(var t=new Array(2048),o=0;o<2048;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=ot[n].flip,e=ot[n].fsym;t[o][n]=s<<10^e}}return t}(),64),bt=Tt(function(){for(var t=new Array(495),o=0;o<495;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=nt[n].slice;t[o][n]=s}}return t}(),0),pt=Dt(function(){for(var t=new Array(40320),o=0;o<40320;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=nt[n].twist;t[o][n]=s}}return t}(),0),mt=It(function(){for(var t=new Array(40320),o=0;o<40320;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=nt[n].flip;t[o][n]=s}}return t}(),0),yt=new Int8Array(324);for(t=0;t<324;t++)yt[t]=-1;yt[0]=0;for(o=0;o<18;o++)yt[st[ot[o].tsym]]=1;wt=new Int8Array(324);for(t=0;t<324;t++)wt[t]=-1;wt[0]=0;for(o=0;o<18;o++)wt[ot[o].twist+16*ot[o].tsym]=1;gt=new Uint16Array(114688),_t=new Uint32Array(57344),xt=new Uint16Array(2688),Mt=new Uint32Array(2688),St=new Uint16Array(324);for(l=0;l<2688;l++)gt[l]=l;for(l=0;l<324;l++)St[l]=l;jt=function(t,o,n){var s,e,u,r,f,i,a=t.length,h=o.length,c=new Uint8Array(h*a);for(s=0;s<h;s++)for(e=0;e<a;e++)c[s*a+e]=255;for(s=0;s<n;s++)c[s*a]=0;var l=1,v=0;for(s=0;s<n;s++)for(e=0;e<a;e++)if(0==c[s*a+e])for(u=0;u<18;u++){var d=t[e][u],b=o[s][u],p=d&1023,m=d>>10;if(255==c[b*a+p]){if(c[b*a+p]=m^rt[16*l+ut[16*l+v]],v++,16==v&&(v=0,l++),l==n)return c;}}}(v,function(){for(var t=new Array(495),o=0;o<495;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=ot[n].slice;t[o][n]=s}}return t}(),168),Pt=function(t,o,n){var s,e,u,r,f,i,a=t.length,h=o.length,c=new Uint32Array(h*a);for(s=0;s<h;s++)for(e=0;e<a;e++)c[s*a+e]=4294967295;for(s=0;s<n;s++)c[s*a]=0;var l=1,v=0;for(s=0;s<n;s++)for(e=0;e<a;e++)if(0==c[s*a+e])for(u=0;u<18;u++){var d=t[e][u],b=o[s][u],p=d&1023,m=d>>10;if(4294967295==c[b*a+p]){if(c[b*a+p]=m^rt[16*l+ut[16*l+v]],v++,16==v&&(v=0,l++),l==n)return c;}}}(v,function(){for(var t=new Array(2048),o=0;o<2048;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=ot[n].flip,e=ot[n].fsym;t[o][n]=s<<10^e}}return t}(),64),At=function(t,o,n){var s,e,u,r,f,i,a=t.length,h=o.length,c=new Uint16Array(h*a);for(s=0;s<h;s++)for(e=0;e<a;e++)c[s*a+e]=65535;for(s=0;s<n;s++)c[s*a]=0;var l=1,v=0;for(s=0;s<n;s++)for(e=0;e<a;e++)if(0==c[s*a+e])for(u=0;u<18;u++){var d=t[e][u],b=o[s][u],p=d&1023,m=d>>10;if(65535==c[b*a+p]){if(c[b*a+p]=m^rt[16*l+ut[16*l+v]],v++,16==v&&(v=0,l++),l==n)return c;}}}(v,function(){for(var t=new Array(2688),o=0;o<2688;o++){t[o]=new Uint16Array(18);for(var n=0;n<18;n++){var s=ot[n].slice,e=ot[n].tsym;t[o][n]=s<<10^e}}return t}(),168)}},t.prototype.solution=function(t,o,n,s,e){for(var u=new W,r=0;r<8;r++)u.cp[r]=r;for(r=0;r<12;r++)u.ep[r]=r;var f="URFDLB",i=0,a=0,h=0;for(r=0;r<t.length;r++){var c=f.indexOf(t.charAt(r));if(c!=-1){var l=1;r+1<t.length&&(t.charAt(r+1)=="'"?(l=3,r++):t.charAt(r+1)=="2"&&(l=2,r++));for(var v=0;v<l;v++)V(u,X[c],u)}}var d=function(t){for(var o=new Array(8),n=0;n<8;n++)o[n]=t.co[n];return it(function(t){for(var o=0,n=0,s=6;0<=s;s--)o+=G(t,n,s+1)*(n=function(t){for(var o=1,n=1;n<=t;n++)o*=n;return o}(s+1));return o}(t.cp),function(t,o){for(var n=0,s=0;s<7;s++)n=3*n+t[s];return n}(o),8,3)}(u),b=function(t){for(var o=new Array(12),n=0;n<12;n++)o[n]=t.eo[n];return at(function(t){for(var o=0,n=0,s=11;0<=s;s--)t[s]<=3&&(o+=n=(11-s-n)*(n+1)/2,n++);return o}(t.ep),function(t,o){for(var n=0,s=0;s<11;s++)n=2*n+t[s];return n}(o),12,2)}(u),p=function(t){for(var o=0,n=0,s=11;0<=s;s--)8<=t[s]&&(o+=n=(11-s-n)*(n+1)/2,n++);return o}(u.ep),m=Math.min(o,21),y=s,w=0,g=new Array(31),_=new Array(31),x=new Array(31),M=new Array(31),S=new Array(31),j=new Array(31),P=new Array(31),A=new Array(31),B=new Array(31),C=new Array(31),k=new Array(31),E=0;for(g[0]=d,x[0]=b,S[0]=p,_[0]=st[d],M[0]=st[b],j[0]=st[p];;){var T=m-E,D=vt[d+2187*p],I=dt[b+2187*p];if(T<D||T<I)E--;else if(0==E)E=Math.max(D,I);else{if(0==D&&0==I&&0==E){var O=g[0],U=x[0],L=S[0];for(r=0;r<E;r++){var R=P[r],F=nt[R].twist,H=nt[R].flip,J=nt[R].slice;O=Ct[16*O+F],U=Ct[16*U+H],L=Ct[16*L+J]}if(0==pt[O>>1]&&0==mt[U>>1]&&0==bt[L])return function(t){for(var o="",n=0;n<t;n++)o+=" "+function(t){return"URFDLB".charAt(t/3)+(" 2'".charAt(t%3))}(P[n]);return o.trim()}(E)}if(0<n&&w>=n)return null;if(E<m){for(P[E]=0;P[E]<18;P[E]++){var K=P[E],N=ot[K].twist,Q=ot[K].flip,W=ot[K].slice,V=st[d+16*N]^_[E+1],Z=st[b+16*Q]^M[E+1],$=st[p+16*W]^j[E+1];if(g[E+1]=Ct[16*g[E]+et[V]],x[E+1]=Ct[16*x[E]+et[Z]],S[E+1]=Ct[16*S[E]+et[$]],_[E+1]=V,M[E+1]=Z,j[E+1]=$,E++,w++,0==E)return null;E--}E--}else E--}}},t}();var Ut=new Ot;t.initTables=function(){Ut.init()},t.Search=Ot}(this.min2phase=this.min2phase||{});
+function createArray(length) {
+	const arr = Array(length);
+	for (var i=0; i<length; i++) {
+		arr[i] = 0;
+	}
+	return arr;
+}
+
+function createArrays(length1, length2) {
+	const arr = Array(length1);
+	for (var i=0; i<length1; i++) {
+		arr[i] = Array(length2);
+		for (var j=0; j<length2; j++) {
+			arr[i][j] = 0;
+		}
+	}
+	return arr;
+}
+
+function bitOdd(i) {
+	i ^= i >>> 1;
+	i ^= i >>> 2;
+	i ^= i >>> 4;
+	i ^= i >>> 8;
+	return i & 1;
+}
+
+function bitCount(i) {
+	i = i - ((i >>> 1) & 0x55555555);
+	i = (i & 0x33333333) + ((i >>> 2) & 0x33333333);
+	return (i + (i >>> 8) + (i >>> 4)) & 0x0f;
+}
+
+function get4Parity(idx) {
+	var p = 0;
+	for (var i=2; i>=0; i--) {
+		p += idx % (4-i);
+		idx = ~~(idx / (4-i));
+	}
+	p &= 1;
+	return p;
+}
+
+function get8Parity(idx) {
+	var p = 0;
+	for (var i=6; i>=0; i--) {
+		p += idx % (8-i);
+		idx = ~~(idx / (8-i));
+	}
+	p &= 1;
+	return p;
+}
+
+function get12Parity(idx) {
+	var p = 0;
+	for (var i=10; i>=0; i--) {
+		p += idx % (12-i);
+		idx = ~~(idx / (12-i));
+	}
+	p &= 1;
+	return p;
+}
+
+
+function binarySearch(arr, key) {
+	var length = arr.length;
+	if (key <= arr[length-1]) {
+		var l = 0;
+		var r = length-1;
+		while (l <= r) {
+			var mid = (l+r)>>>1;
+			var val = arr[mid];
+			if (key > val) {
+				l = mid + 1;
+			} else if (key < val) {
+				r = mid - 1;
+			} else {
+				return (mid);
+			}
+		}
+	}
+	return 0xffff;
+}
+
+var fact = [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800, 39916800, 479001600];
+var perm3 = [[11, 10, 9], [10, 11, 9], [11, 9, 10], [9, 11, 10], [10, 9, 11], [9, 10, 11]];
+var ud2std = [0, 1, 2, 4, 7, 9, 10, 11, 13, 16];
+var std2ud = createArray(18);
+var Cnk = createArrays(12, 13);
+var move2str = ["U ", "U2", "U'", "R ", "R2", "R'", "F ", "F2", "F'", "D ", "D2", "D'", "L ", "L2", "L'", "B ", "B2", "B'"];
+var urfMove = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,16,17], 
+											[6, 7, 8, 0, 1, 2, 3, 4, 5,15,16,17, 9,10,11,12,13,14],
+											[3, 4, 5, 6, 7, 8, 0, 1, 2,12,13,14,15,16,17, 9,10,11],
+											[2, 1, 0, 5, 4, 3, 8, 7, 6,11,10, 9,14,13,12,17,16,15], 
+											[8, 7, 6, 2, 1, 0, 5, 4, 3,17,16,15,11,10, 9,14,13,12],
+											[5, 4, 3, 8, 7, 6, 2, 1, 0,14,13,12,17,16,15,11,10, 9]];
+for (var i=0; i<12; i++) {
+	Cnk[i][0] = 1;
+	Cnk[i][i] = 1;
+	Cnk[i][i+1] = 0;
+	for (var j=1; j<i; j++) {
+		Cnk[i][j] = (Cnk[i-1][j-1] + Cnk[i-1][j]);
+	}
+}
+for (var i=0; i<10; i++) {
+	std2ud[ud2std[i]] = i;
+}
+
+var ckmv = Array(19);//new boolean[19][18];
+var ckmv2 = Array(11);//new boolean[11][10];
+ckmv[18] = Array(18);
+ckmv2[10] = Array(10);
+for (var i=0; i<18; i++) {
+	ckmv[i] = Array(18);
+	for (var j=0; j<18; j++) {
+		ckmv[i][j] = (~~(i/3) == ~~(j/3)) || ((~~(i/3)%3 == ~~(j/3)%3) && (i>=j));
+	}
+	ckmv[18][i] = false;
+}
+for (var i=0; i<10; i++) {
+	ckmv2[i] = Array(10);
+	for (var j=0; j<10; j++) {
+		ckmv2[i][j] = ckmv[ud2std[i]][ud2std[j]];
+	}
+	ckmv2[10][i] = false;
+}
+
+
+//********************************************************************************//
+
+function CubieCube() {
+	this.cp = [0, 1, 2, 3, 4, 5, 6, 7];
+	this.co = [0, 0, 0, 0, 0, 0, 0, 0];
+	this.ep = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+	this.eo = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+	this.getFlip = function getFlip() {
+		var idx = 0;
+		for (var i=0; i<11; i++) {
+			idx |= this.eo[i] << i;
+		}
+		return idx;
+	}
+	
+	this.getFlipSym = function getFlipSym() {
+		if (FlipR2S != 0) {
+			return FlipR2S[this.getFlip()];
+		}
+		for (var k=0; k<16; k+=2) {
+			EdgeConjugate(this, SymInv[k], temps);
+			var idx = binarySearch(FlipS2R, temps.getFlip());
+			if (idx != 0xffff) {
+				return ((idx << 3) | (k >>> 1));
+			}
+		}
+		return 0;
+	}
+
+	this.setFlip = function setFlip(idx) {
+		this.eo[11] = bitOdd(idx);
+		for (var i=0; i<11; i++) {
+			this.eo[i] = idx & 1;
+			idx >>>= 1;
+		}
+	}
+	
+	this.getTwist = function getTwist() {
+		var idx = 0;
+		for (var i=0; i<7; i++) {
+			idx *= 3;
+			idx += this.co[i];
+		}
+		return idx;
+	}
+	
+	this.getTwistSym = function getTwistSym() {
+		if (TwistR2S != null) {
+			return TwistR2S[this.getTwist()];
+		}
+		for (var k=0; k<16; k+=2) {
+			CornConjugate(this, SymInv[k], temps);
+			idx = binarySearch(TwistS2R, temps.getTwist());
+			if (idx != 0xffff) {
+				return ((idx << 3) | (k >>> 1));
+			}
+		}
+		return 0;
+	}
+
+
+	this.setTwist = function setTwist(idx) {
+		var twst = 0;
+		for (var i=6; i>=0; i--) {
+			twst += this.co[i] = idx % 3;
+			idx = ~~(idx/3);
+		}
+		this.co[7] = (15 - twst) % 3;
+	}
+	
+	this.getUDSlice = function getUDSlice() {
+		var idx = 0;
+		var r = 4;
+		for (var i=0; i<12; i++) {
+			if (this.ep[i] >= 8) {
+				idx += Cnk[11-i][r];
+				r--;
+			}
+		}
+		return idx;
+	}
+
+	this.setUDSlice = function setUDSlice(idx) {
+		var r = 4;
+		for (var i=0; i<12; i++) {
+			if (idx >= Cnk[11-i][r]) {
+				idx -= Cnk[11-i][r];
+				r--;
+				this.ep[i] = (11-r);
+			} else {
+				this.ep[i] = (i+r-4);
+			}
+		}
+	}
+	this.getMPerm = function getMPerm() {
+		var m = (1 << this.ep[11]);		
+		var idx = 0;
+		for (var i=10; i>=8; --i) {
+			var t = 1 << this.ep[i];
+			idx += bitCount(m & (t - 1)) * fact[11-i];
+			m |= t;
+		}
+		return idx;
+	}	
+	this.setMPerm = function setMPerm(idx) {
+		this.ep[11] = 8;
+		for (var i=10; i>=8; i--) {
+			this.ep[i] = (idx % (12-i) + 8);
+			idx = ~~(idx / (12-i));
+			for (var j=i+1; j<12; j++) {
+				if (this.ep[j] >= this.ep[i])
+					this.ep[j]++;
+			}
+		}	
+	}
+	
+	this.getMid3 = function getMid3() {
+		var idxA = 0;
+		var idxB = 0;
+		var mask = 0;
+		var r = 3;
+		for (var i=11; i>=0; i--) {
+			if (this.ep[i] >= 9) {
+				idxA += Cnk[i][r--];
+				var t = 1 << this.ep[i];
+				idxB += bitCount(mask & (t - 1)) * fact[2-r];
+				mask |= t;
+			}
+		}
+		return (idxA * 6 + idxB);
+	}
+	
+	this.setMid3 = function setMid3(idxA) {
+		var edge = perm3[idxA % 6];
+		idxA = ~~(idxA / 6);
+		var r = 3;
+		for (var i=11; i>=0; i--) {
+			if (idxA >= Cnk[i][r]) {
+				idxA -= Cnk[i][r--];
+				this.ep[i] = edge[2-r];
+			} else {
+				this.ep[i] = (8-i+r);
+			}
+		}	
+	}
+	
+	this.getURtoUL = function getURtoUL() {
+		var idxA = 0;
+		var idxB = 0;
+		var mask = 0;
+		var r = 3;
+		for (var i=11; i>=0; i--) {
+			if (this.ep[i] <= 2) {
+				idxA += Cnk[i][r--];
+				var t = 1 << this.ep[i];
+				idxB += bitCount(mask & (t - 1)) * fact[2-r];
+				mask |= t;
+			}
+		}
+		return (idxA * 6 + idxB);	
+	}
+
+	this.getDRtoDL = function getDRtoDL() {
+		var idxA = 0;
+		var idxB = 0;
+		var mask = 0;
+		var r = 3;
+		for (var i=11; i>=0; i--) {
+			if (4 <= this.ep[i] && this.ep[i] <= 6) {
+				idxA += Cnk[i][r--];
+				var t = 1 << this.ep[i];
+				idxB += bitCount(mask & (t - 1)) * fact[2-r];
+				mask |= t;
+			}
+		}
+		return (idxA * 6 + idxB);	
+	}	
+
+	this.setEdgePerm = function setEdgePerm(idx) {
+		this.ep[11] = 0;
+		for (var i=10; i>=0; i--) {
+			this.ep[i] = (idx % (12-i));
+			idx = ~~(idx/(12-i));
+			for (var j=i+1; j<12; j++) {
+				if (this.ep[j] >= this.ep[i])
+					this.ep[j]++;
+			}
+		}			
+	}
+	
+	this.getEdgePerm = function getEdgePerm() {
+		var m = (1 << ep[11]);		
+		var idx = 0;
+		for (var i=10; i>=0; --i) {
+			var t = 1 << this.ep[i];
+			idx += bitCount(m & (t - 1)) * fact[11-i];
+			m |= t;
+		}
+		return idx;		
+	}
+
+	this.getCPermSym = function getCPermSym() {
+		if (EPermR2S != null) {
+			var idx = EPermR2S[get8Perm(this.cp)];
+			idx ^= e2c[idx&0x0f];
+			return idx;
+		}
+		for (var k=0; k<16; k++) {
+			CornConjugate(this, SymInv[k], temps);
+			var idx = binarySearch(CPermS2R, get8Perm(temps.cp));
+			if (idx != 0xffff) {
+				return ((idx << 4) | k);
+			}
+		}
+		return 0;
+	}
+	
+	this.getEPermSym = function getEPermSym() {	
+		if (EPermR2S != null) {
+			return EPermR2S[get8Perm(this.ep)];
+		}
+		for (var k=0; k<16; k++) {
+			EdgeConjugate(this, SymInv[k], temps);
+			var idx = binarySearch(EPermS2R, get8Perm(temps.ep));
+			if (idx != 0xffff) {
+				return (char) ((idx << 4) | k);
+			}
+		}
+		return 0;
+	}	
+
+	this.URFConjugate = function URFConjugate() {
+		CornMult(urf2, this, temps);
+		CornMult(temps, urf1, this);		
+		EdgeMult(urf2, this, temps);
+		EdgeMult(temps, urf1, this);		    		
+	}
+	
+	this.invCubieCube = function invCubieCube() {
+		for (var edge=0; edge<12; edge++)
+			temps.ep[this.ep[edge]] = edge;
+		for (var edge=0; edge<12; edge++)
+			temps.eo[edge] = this.eo[temps.ep[edge]];
+		for (var corn=0; corn<8; corn++)
+			temps.cp[this.cp[corn]] = corn;
+		for (var corn=0; corn<8; corn++) {
+			var ori = this.co[temps.cp[corn]];
+			temps.co[corn] = -ori;
+			if (temps.co[corn] < 0)
+				temps.co[corn] += 3;
+		}
+		this.copy(temps);
+	}
+
+
+	this.init = function init(cperm, twist, eperm, flip) {
+		set8Perm(this.cp, cperm);
+		this.setTwist(twist);
+		this.setEdgePerm(eperm);
+		this.setFlip(flip);
+	}
+	
+	this.copy = function copy(c) {
+		for (var i=0; i<8; i++) {
+			this.cp[i] = c.cp[i];
+			this.co[i] = c.co[i];
+		}
+		for (var i = 0; i < 12; i++) {
+			this.ep[i] = c.ep[i];
+			this.eo[i] = c.eo[i];
+		}
+	}
+}
+
+const cctemp = new CubieCube();
+const temps = new CubieCube();
+
+function set8Perm(arr, idx) {
+	var val = 0x76543210;
+	for (var i=0; i<7; i++) {
+		var p = fact[7-i];
+		var v = ~~(idx / p);
+		idx %= p;
+		v <<= 2;
+		arr[i] = ((val >> v) & 7);
+		var m = (1 << v) - 1;
+		val = (val & m) + ((val >> 4) & ~m);
+	}
+	arr[7] = val;
+}
+
+function get8Perm(arr) {
+	var idx = 0;
+	var val = 0x76543210;
+	for (var i=0; i<7; i++) {
+		var v = arr[i] << 2;
+		idx = (8 - i) * idx + ((val >> v) & 7);
+		val -= 0x11111110 << v;
+	}
+	return idx;	
+}
+
+function CornMult(a, b, prod) {
+	for (var corn=0; corn<8; corn++) {
+		prod.cp[corn] = a.cp[b.cp[corn]];
+		var oriA = a.co[b.cp[corn]];
+		var oriB = b.co[corn];
+		var ori = oriA;
+		ori += (oriA<3) ? oriB : 3-oriB;
+		ori %= 3;
+		if (oriA < 3 ^ oriB < 3) {
+			ori += 3;
+		}
+		prod.co[corn] = ori;
+	}
+}	
+
+function EdgeMult(a, b, prod) {
+	for (var ed=0; ed<12; ed++) {
+		prod.ep[ed] = a.ep[b.ep[ed]];
+		prod.eo[ed] = (b.eo[ed] ^ a.eo[b.ep[ed]]);
+	}
+}
+
+function CornConjugate(a, idx, b) {
+	CornMult(CubeSym[SymInv[idx]], a, cctemp);
+	CornMult(cctemp, CubeSym[idx], b);		
+}
+
+function EdgeConjugate(a, idx, b) {
+	EdgeMult(CubeSym[SymInv[idx]], a, cctemp);
+	EdgeMult(cctemp, CubeSym[idx], b);		
+}
+
+var CubeSym = Array(16);
+var moveCube = Array(18);
+var SymInv = Array(16);
+var SymMult = Array(16);
+var SymMove = Array(16);
+var Sym8Mult = Array(8);
+var Sym8Move = Array(8);
+var Sym8MultInv = Array(8);
+var SymMoveUD = Array(16);
+var FlipS2R = Array(336);
+var TwistS2R = Array(324);
+var CPermS2R = Array(2768);
+var EPermS2R = CPermS2R;
+var FlipR2S = Array(2048);
+var TwistR2S = Array(2187);
+var EPermR2S = createArray(40320);
+for (var i=0; i<40320; i++) {
+	EPermR2S[i] = 0;
+}
+var MtoEPerm = Array(40320);
+var merge = Array(56);
+var e2c = [0, 0, 0, 0, 1, 3, 1, 3, 1, 3, 1, 3, 0, 0, 0, 0];
+const urf1 = new CubieCube();
+urf1.init(2531, 1373, 67026819, 1877);
+const urf2 = new CubieCube();
+urf2.init(2089, 1906, 322752913, 255);
+
+
+function CubieInit() {
+	var mc = Array(6);
+	mc[0] = new CubieCube();
+	mc[0].init(15120, 0, 119750400, 0);
+	mc[1] = new CubieCube();
+	mc[1].init(21021, 1494, 323403417, 0);
+	mc[2] = new CubieCube();
+	mc[2].init(8064, 1236, 29441808, 802);
+	mc[3] = new CubieCube();
+	mc[3].init(9, 0, 5880, 0);
+	mc[4] = new CubieCube();
+	mc[4].init(1230, 412, 2949660, 0);
+	mc[5] = new CubieCube();
+	mc[5].init(224, 137, 328552, 1160);
+	for (var m=0; m<6; m++) {
+		moveCube[m*3] = mc[m];
+		for (var p=0; p<2; p++) {
+			moveCube[m*3+p+1] = new CubieCube();
+			EdgeMult(moveCube[m*3+p], mc[m], moveCube[m*3+p+1]);
+			CornMult(moveCube[m*3+p], mc[m], moveCube[m*3+p+1]);
+		}
+	}
+	var c = new CubieCube();
+	var d = new CubieCube();
+	var temp;
+	var f2 = new CubieCube();
+	f2.init(28783, 0, 259268407, 0);
+	var u4 = new CubieCube();
+	u4.init(15138, 0, 119765538, 1792);
+	var lr2 = new CubieCube();
+	lr2.init(5167, 0, 83473207, 0);
+	lr2.co = [ 3, 3, 3, 3, 3, 3, 3, 3 ];
+	for (var i=0; i<16; i++) {
+		SymMult[i] = Array(16);
+		SymMove[i] = Array(18);
+		SymMoveUD[i] = Array(10);
+		CubeSym[i] = new CubieCube();
+		CubeSym[i].copy(c);
+		CornMult(c, u4, d);
+		EdgeMult(c, u4, d);
+		temp = d;	d = c;	c = temp;
+		if (i % 4 == 3) {
+			CornMult(c, lr2, d);
+			EdgeMult(c, lr2, d);
+			temp = d;	d = c;	c = temp;				
+		}
+		if (i % 8 == 7) {
+			CornMult(c, f2, d);
+			EdgeMult(c, f2, d);
+			temp = d;	d = c;	c = temp;
+		}
+	}
+
+	for (var j=0; j<16; j++) {
+		for (var k=0; k<16; k++) {
+			CornMult(CubeSym[j], CubeSym[k], c);
+			if (c.cp[0] == 0 && c.cp[1] == 1 && c.cp[2] == 2) {
+				SymInv[j] = k;
+				break;
+			}
+		}
+	}
+	for (var i=0; i<16; i++) {
+		for (var j=0; j<16; j++) {
+			CornMult(CubeSym[i], CubeSym[j], c);
+			for (var k=0; k<16; k++) {
+				if (CubeSym[k].cp[0] == c.cp[0] && CubeSym[k].cp[1] == c.cp[1] && CubeSym[k].cp[2] == c.cp[2]) {
+					SymMult[i][j] = k;
+					break;
+				}
+			}
+		}
+	}
+	for (var j=0; j<18; j++) {
+		for (var s=0; s<16; s++) {
+			CornConjugate(moveCube[j], SymInv[s], c);
+			for (var m=0; m<18; m++) {
+				var found = 1;
+				for (var i=0; i<8; i++) {
+					if (c.cp[i] != moveCube[m].cp[i] || c.co[i] != moveCube[m].co[i]) {
+						found = 0;
+						break;
+					}
+				}
+				if (found) {
+					SymMove[s][j] = m;
+				}
+			}
+		}
+	}
+	for (var j=0; j<10; j++) {
+		for (var s=0; s<16; s++) {
+			SymMoveUD[s][j] = std2ud[SymMove[s][ud2std[j]]];
+		}
+	}
+	for (var j=0; j<8; j++) {
+		Sym8Mult[j] = Array(8);
+		Sym8Move[j] = Array(18);
+		Sym8MultInv[j] = Array(8);
+		for (var s=0; s<8; s++) {
+			Sym8Mult[j][s] = (SymMult[j<<1][s<<1]>>>1);
+		}
+	}
+	for (var j=0; j<18; j++) {
+		for (var s=0; s<8; s++) {
+			Sym8Move[s][j] = SymMove[s<<1][j];
+		}
+	}
+	for (var j=0; j<8; j++) {
+		for (var s=0; s<8; s++) {
+			Sym8MultInv[j][s] = Sym8Mult[j][SymInv[s<<1]>>1];
+		}
+	}
+
+	const occ = new Array(1260);
+
+	var count = 0;
+	for (var i=0; i<64; occ[i++] = 0);
+
+	for (var i=0; i<2048; i++) {
+		if ((occ[i>>>5]&(1<<(i&0x1f))) == 0) {
+			c.setFlip(i);
+			for (var s=0; s<16; s+=2) {
+				EdgeConjugate(c, s, d);
+				var idx = d.getFlip();
+				occ[idx>>>5] |= 1<<(idx&0x1f);
+				FlipR2S[idx] = ((count << 3) | (s >>> 1));
+			}
+			FlipS2R[count++] = i;
+		}
+	}
+//	alert(count);
+	count = 0;
+	for (var i=0; i<69; occ[i++] = 0);
+	for (var i=0; i<2187; i++) {
+		if ((occ[i>>>5]&(1<<(i&0x1f))) == 0) {
+			c.setTwist(i);
+			for (var s=0; s<16; s+=2) {
+				CornConjugate(c, s, d);
+				var idx = d.getTwist();
+				occ[idx>>>5] |= 1<<(idx&0x1f);
+				TwistR2S[idx] =  ((count << 3) | (s >>> 1));
+			}
+			TwistS2R[count++] = i;
+		}
+	}
+//	alert(count);
+
+	var mask = Array(56);
+	for (var i=0; i<56; i++) {
+		mask[i] = Array(2);
+		merge[i] = Array(56);
+	}
+	for (var i=0; i<40320; i++) {
+		set8Perm(c.ep, i);
+		var a = ~~(c.getURtoUL() / 6);
+		var b = ~~(c.getDRtoDL() / 6);
+		mask[a][b>>>5] |= 1 << (b&0x1f);
+	}
+	
+	for (var i=0; i<56; i++) {
+		count = 0;
+		for (var j=0; j<56; j++) {
+			if ((mask[i][j>>>5]&(1<<(j&0x1f))) != 0) {
+				merge[i][j] = count++;
+			}
+		}
+	}
+	count = 0;
+	for (var i=0; i<1260; occ[i++] = 0);
+	for (var i=0; i<40320; i++) {
+		if ((occ[i>>>5]&(1<<(i&0x1f))) == 0) {
+			set8Perm(c.ep, i);
+			for (var s=0; s<16; s++) {
+				EdgeConjugate(c, s, d);
+				var idx = get8Perm(d.ep);
+				occ[idx>>>5] |= 1<<(idx&0x1f);
+				var a = d.getURtoUL();
+				var b = d.getDRtoDL();
+				var m = (merge[~~(a/6)][~~(b/6)] * 4032 + a * 12 + b % 6 * 2 + get8Parity(idx));
+				MtoEPerm[m] = (count << 4 | s);
+				EPermR2S[idx] = (count << 4 | s);
+			}
+			EPermS2R[count++] = i;
+		}
+	}
+}
+
+var UDSliceMove = Array(495);//new char[495][18];
+var TwistMove = Array(324);//new char[324][18];
+var FlipMove = Array(336);//new char[336][18];
+var UDSliceConj = Array(495);//new char[495][8];
+var UDSliceTwistPrun = Array(495*324);//new byte[495 * 324];
+var UDSliceFlipPrun = Array(495*336);//new byte[495 * 336];
+	
+var TwistFlipPrun = Array(336*324*8);//new byte[336 * 324 * 8];
+	
+	//phase1to2
+var Mid3Move = Array(1320);//new char[1320][18];
+var Mid32MPerm = Array(24);//new byte[24];
+var CParity = Array(87);//new byte[2768/8];
+
+	//phase2
+var CPermMove = Array(2768);//new char[2768][18];
+var EPermMove = Array(2768);//new char[2768][10];
+var MPermMove = Array(24);//new byte[24][10];
+var MPermConj = Array(24);//new byte[24][16];
+var MCPermPrun = Array(24*2768);//new byte[24*2768];
+var MEPermPrun = Array(24*2768);//new byte[24*2768];
+
+
+function CoordInit() {
+	var c = new CubieCube();
+	var d = new CubieCube();
+	var i, j;
+	for (i=0; i<2768; i++) {
+		CPermMove[i] = Array(18);
+		set8Perm(c.cp, CPermS2R[i]);
+		for (j=0; j<18; j++) {
+			CornMult(c, moveCube[j], d);
+			CPermMove[i][j] = d.getCPermSym();
+		}
+	}		
+	for (i=0; i<2768; i++) {
+		EPermMove[i] = Array(10);
+		set8Perm(c.ep, EPermS2R[i]);
+		for (j=0; j<10; j++) {
+			EdgeMult(c, moveCube[ud2std[j]], d);
+			EPermMove[i][j] = d.getEPermSym();
+		}
+	}
+	for (i=0; i<336; i++) {
+		FlipMove[i] = Array(18);
+		c.setFlip(FlipS2R[i]);
+		for (j=0; j<18; j++) {
+			EdgeMult(c, moveCube[j], d);
+			FlipMove[i][j] = d.getFlipSym();
+		}
+	}
+	for (i=0; i<324; i++) {
+		TwistMove[i] = Array(18);
+		c.setTwist(TwistS2R[i]);
+		for (j=0; j<18; j++) {
+			CornMult(c, moveCube[j], d);
+			TwistMove[i][j] = d.getTwistSym();
+		}
+	}
+	for (i=0; i<495; i++) {
+		UDSliceMove[i] = Array(18);
+		c.setUDSlice(i);
+		for (j=0; j<18; j++) {
+			EdgeMult(c, moveCube[j], d);
+			UDSliceMove[i][j] = d.getUDSlice();
+		}
+	}
+	for (i=0; i<495; i++) {
+		UDSliceConj[i] = Array(8);
+		c.setUDSlice(i);
+		for (j=0; j<16; j+=2) {
+			EdgeConjugate(c, SymInv[j], d);
+			UDSliceConj[i][j>>>1] = d.getUDSlice();
+		}
+	}
+	for (i=0; i<1320; i++) {
+		Mid3Move[i] = Array(18);
+		c.setMid3(i);
+		for (j=0; j<18; j++) {
+			EdgeMult(c, moveCube[j], d);
+			Mid3Move[i][j] = d.getMid3();
+		}
+	}	
+	for (i=0; i<24; i++) {
+		c.setMPerm(i);
+		Mid32MPerm[c.getMid3() % 24] = i;
+	}
+	for (i=0; i<2768; i++) {
+		CParity[i>>>3] |= (get8Parity(CPermS2R[i])) << (i & 7);
+	}
+	for (i=0; i<24; i++) {
+		MPermMove[i] = Array(10);
+		c.setMPerm(i);
+		for (j=0; j<10; j++) {
+			EdgeMult(c, moveCube[ud2std[j]], d);
+			MPermMove[i][j] = d.getMPerm();
+		}
+	}		
+	for (i=0; i<24; i++) {
+		MPermConj[i] = Array(16);
+		c.setMPerm(i);
+		for (j=0; j<16; j++) {
+			EdgeConjugate(c, SymInv[j], d);
+			MPermConj[i][j] = d.getMPerm();
+		}
+	}
+	
+	var SymState = Array(324);
+	for (i=0; i<324; i++) {
+		c.setTwist(TwistS2R[i]);
+		for (var j=0; j<8; j++) {
+			CornConjugate(c, j<<1, d);
+			if (binarySearch(TwistS2R, d.getTwist()) != 0xffff) {
+				SymState[i] |= (1 << j);
+			}
+		}
+	}
+	var SymStateF = Array(324);
+	for (i=0; i<336; i++) {
+		c.setFlip(FlipS2R[i]);
+		for (var j=0; j<8; j++) {
+			EdgeConjugate(c, j<<1, d);
+			if (binarySearch(FlipS2R, d.getFlip()) != 0xffff) {
+				SymStateF[i] |= (1 << j);
+			}
+		}
+	}		
+	for (i=0; i<336*324*8; i++) {
+		TwistFlipPrun[i] = -1;
+	}
+	for (i=0; i<8; i++) {
+		TwistFlipPrun[i] = 0;
+	}
+	var depth = 0;
+	var done = 8;
+	var inv;
+	var select;
+	var check;
+	
+	while (done < 336*324*8) {
+		inv = depth > 6;
+		select = inv ? -1 : depth;
+		check = inv ? depth : -1;
+		depth++;
+		for (i=0; i<336*324*8; i++) {
+			if (TwistFlipPrun[i] != select)
+				continue;
+			var twist = ~~(i / 2688);
+			var flip = i % 2688;
+			var fsym = i & 7;
+			flip >>>= 3;
+			for (var m=0; m<18; m++) {
+				var twistx = TwistMove[twist][m];
+				var tsymx = twistx & 7;
+				twistx >>>= 3;
+				var flipx = FlipMove[flip][Sym8Move[fsym][m]];
+				var fsymx = Sym8MultInv[Sym8Mult[flipx & 7][fsym]][tsymx];
+				flipx >>>= 3;
+				var idx = twistx * 2688 + (flipx << 3 | fsymx);
+				if (TwistFlipPrun[idx] == check) {
+					done++;
+					if (inv) {
+						TwistFlipPrun[i] = depth;
+						break;
+					} else {
+						TwistFlipPrun[idx] = depth;
+						var sym = SymState[twistx];
+						var symF = SymStateF[flipx];
+						if (sym != 1 || symF != 1) {
+							for (var j=0; j<8; j++, symF >>= 1) {
+								if ((symF & 1) == 1) {
+									var fsymxx = Sym8MultInv[fsymx][j];
+									for (var k=0; k<8; k++) {
+										if ((sym & (1 << k)) != 0) {
+											var idxx = twistx * 2688 + (flipx << 3 | Sym8MultInv[fsymxx][k]);
+											if (TwistFlipPrun[idxx] == -1) {
+												TwistFlipPrun[idxx] = depth;
+												done++;
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+//			System.out.println(String.format("%2d%10d", depth, done));
+	}
+	for (i=0; i<495*324; i++) {
+		UDSliceTwistPrun[i] = -1;
+	}
+	UDSliceTwistPrun[0] = 0;
+	depth = 0;
+	done = 1;
+	while (done < 495 * 324) {
+		inv = depth > 6;
+		select = inv ? -1 : depth;
+		check = inv ? depth : -1;
+		depth++;
+		for (i=0; i<495*324; i++) {
+			if (UDSliceTwistPrun[i] == select) {
+				var slice = i % 495;
+				var twist = ~~(i / 495);
+				for (var m=0; m<18; m++) {
+					var twistx = TwistMove[twist][m];
+					var symx = twistx & 7;
+					var slicex = UDSliceConj[UDSliceMove[slice][m]][symx];
+					twistx >>>= 3;
+					var idx = twistx * 495 + slicex;
+					if (UDSliceTwistPrun[idx] == check) {
+						done++;
+						if (inv) {
+							UDSliceTwistPrun[i] = depth;
+							break;
+						} else {
+							UDSliceTwistPrun[idx] = depth;
+							var sym = SymState[twistx];
+							if (sym != 1) {
+								for (var j=1; j<8; j++) {
+									sym >>= 1;
+									if ((sym & 1) == 1) {
+										var idxx = twistx * 495 + UDSliceConj[slicex][j];
+										if (UDSliceTwistPrun[idxx] == -1) {
+											UDSliceTwistPrun[idxx] = depth;
+											done++;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+//			System.out.println(String.format("%2d%10d", depth, done));
+	}		
+
+	for (i=0; i<495*336; i++) {
+		UDSliceFlipPrun[i] = -1;
+	}
+	UDSliceFlipPrun[0] = 0;
+	depth = 0;
+	done = 1;
+	while (done < 495 * 336) {
+		inv = depth > 6;
+		select = inv ? -1 : depth;
+		check = inv ? depth : -1;
+		depth++;
+		for (i=0; i<495*336; i++) {
+			if (UDSliceFlipPrun[i] == select) {
+				var slice = i % 495;
+				var flip = ~~(i / 495);
+				for (var m=0; m<18; m++) {
+					var flipx = FlipMove[flip][m];
+					var symx = flipx & 7;
+					var slicex = UDSliceConj[UDSliceMove[slice][m]][symx];
+					flipx >>>= 3;
+					var idx = flipx * 495 + slicex;
+					if (UDSliceFlipPrun[idx] == check) {
+						done++;
+						if (inv) {
+							UDSliceFlipPrun[i] = depth;
+							break;
+						} else {
+							UDSliceFlipPrun[idx] = depth;
+							var sym = SymStateF[flipx];
+							if (sym != 1) {
+								for (var j=1; j<8; j++) {
+									sym >>= 1;
+									if ((sym & 1) == 1) {
+										var idxx = flipx * 495 + UDSliceConj[slicex][j];
+										if (UDSliceFlipPrun[idxx] == -1) {
+											UDSliceFlipPrun[idxx] = depth;
+											done++;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+//			depth++;
+//			System.out.println(String.format("%2d%10d", depth, done));
+	}	
+	
+	SymState = Array(2768);
+	for (i=0; i<2768; i++) {
+		set8Perm(c.ep, EPermS2R[i]);
+		for (j=1; j<16; j++) {
+			EdgeConjugate(c, j, d);
+			if (binarySearch(EPermS2R, get8Perm(d.ep)) != 0xffff) {
+				SymState[i] |= (1 << j);
+			}
+		}
+	}
+	for (i=0; i<24*2768; i++) {
+		MEPermPrun[i] = -1;
+	}
+	MEPermPrun[0] = 0;
+	while (done < 24*2768) {
+		inv = depth > 7;
+		select = inv ? -1 : depth;
+		check = inv ? depth : -1;
+		depth++;
+		for (i=0; i<24*2768; i++) {
+			if (MEPermPrun[i] == select) {
+				var mid = i % 24;
+				var edge = ~~(i / 24);
+				for (var m=0; m<10; m++) {
+					var edgex = EPermMove[edge][m];
+					var symx = edgex & 15;
+					var midx = MPermConj[MPermMove[mid][m]][symx];
+					edgex >>>= 4;
+					var idx = edgex * 24 + midx;
+					if (MEPermPrun[idx] == check) {
+						done++;
+						if (inv) {
+							MEPermPrun[i] = depth;
+							break;
+						} else {
+							MEPermPrun[idx] = depth;
+							var sym = SymState[edgex];
+							if (sym != 0) {
+								for (j=1; j<16; j++) {
+									sym >>= 1;
+									if ((sym & 1) == 1) {
+										var idxx = edgex * 24 + MPermConj[midx][j];
+										if (MEPermPrun[idxx] == -1) {
+											MEPermPrun[idxx] = depth;
+											done++;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+//			System.out.println(String.format("%2d%10d", depth, done));
+	}		
+		
+	for (i=0; i<24*2768; i++) {
+		MCPermPrun[i] = -1;
+	}
+	MCPermPrun[0] = 0;
+	depth = 0;
+	done = 1;
+	while (done < 24*2768) {
+		inv = depth > 7;
+		select = inv ? -1 : depth;
+		check = inv ? depth : -1;
+		depth++;
+		for (i=0; i<24*2768; i++) {
+			if (MCPermPrun[i] == select) {
+				var mid = i % 24;
+				var corn = ~~(i / 24);
+				for (var m=0; m<10; m++) {
+					var cornx = CPermMove[corn][ud2std[m]];
+					var symx = (cornx & 15);
+					var midx = MPermConj[MPermMove[mid][m]][symx];
+					cornx >>>= 4;
+					var idx = cornx * 24 + midx;
+					if (MCPermPrun[idx] == check) {
+						done++;
+						if (inv) {
+							MCPermPrun[i] = depth;
+							break;
+						} else {
+							MCPermPrun[idx] = depth;
+							var sym = SymState[cornx];
+							if (sym != 0) {
+								for (j=1; j<16; j++) {
+									sym >>= 1;
+									if ((sym & 1) == 1) {
+										var idxx = cornx * 24 + MPermConj[midx][j ^ e2c[j]];
+										if (MCPermPrun[idxx] == -1) {
+											MCPermPrun[idxx] = depth;
+											done++;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+//			System.out.println(String.format("%2d%10d", depth, done));
+	}
+}					
+
+function randomCube() {
+	var eperm;
+	var cperm;
+	do {
+		eperm = ~~(Math.random() * 479001600);
+		cperm = ~~(Math.random() * 40320);
+	} while (((get8Parity(cperm) ^ get12Parity(eperm))) != 0);
+	c = new CubieCube();
+	c.init(cperm, ~~(Math.random() * 2187), eperm, ~~(Math.random() * 2048));
+	return c;
+}
+
+var move = Array(31);
+
+var corn = Array(20);
+var csym = Array(20);
+var mid3 = Array(20);
+var e1 = Array(20);
+var e2 = Array(20);
+var urfidx;
+
+var twist = Array(6);
+var tsym = Array(6);
+var flip = Array(6);
+var fsym = Array(6);
+var slice = Array(6);
+var corn0 = Array(6);
+var csym0 = Array(6);
+var mid30 = Array(6);
+var e10 = Array(6);
+var e20 = Array(6);
+var prun = Array(6);
+
+var length1 = 0;
+var maxlength2 = 0;
+var sol = 999;
+var valid1 = 0;
+var valid2 = 0;
+var solution = "";
+var useSeparator = false;
+
+function Solve(c) {
+	c.temps = new CubieCube();
+	for (var i=0; i<6; i++) {
+		twist[i] = c.getTwistSym();
+		tsym[i] = twist[i] & 7;
+		twist[i] >>>= 3;
+		flip[i] = c.getFlipSym();
+		fsym[i] = flip[i] & 7;
+		flip[i] >>>= 3;
+		slice[i] = c.getUDSlice();
+		corn0[i] = c.getCPermSym();
+		csym0[i] = corn0[i] & 15;
+		corn0[i] >>>= 4;
+		mid30[i] = c.getMid3();
+		e10[i] = c.getURtoUL();
+		e20[i] = c.getDRtoDL();
+		prun[i] = Math.max(Math.max(UDSliceTwistPrun[twist[i] * 495 + UDSliceConj[slice[i]][tsym[i]]],
+						UDSliceFlipPrun[flip[i] * 495 + UDSliceConj[slice[i]][fsym[i]]]),
+						TwistFlipPrun[twist[i] * 2688 + (flip[i] << 3 | Sym8MultInv[fsym[i]][tsym[i]])]);
+		c.URFConjugate();
+		if (i==2) {
+			c.invCubieCube();
+		}
+	}
+	solution = null;
+	sol = 22;
+	for (length1=0; length1<sol; length1++) {
+		maxlength2 = Math.min(sol/2+1, sol-length1);
+		for (urfidx=0; urfidx<6; urfidx++) {
+			corn[0] = corn0[urfidx];
+			csym[0] = csym0[urfidx];
+			mid3[0] = mid30[urfidx];
+			e1[0] = e10[urfidx];
+			e2[0] = e20[urfidx];
+			if ((prun[urfidx] <= length1)
+					&& phase1(twist[urfidx], tsym[urfidx], flip[urfidx], fsym[urfidx],
+								slice[urfidx], length1, 18)) {
+				if (solution == null) {
+					return "Error 8";
+				} else {
+					return solution;
+				}
+			}
+		}
+	}
+	return "Error 7";
+}
+
+function phase1(twist, tsym, flip, fsym, slice, maxl, lm) {
+	if (twist==0 && flip==0 && slice==0 && maxl < 5) {
+		return maxl == 0 && init2();
+	}
+	for (var m=0; m<18; m++) {
+		if (ckmv[lm][m]) {
+			m+=2;
+			continue;
+		}
+		var slicex = UDSliceMove[slice][m];
+		var twistx = TwistMove[twist][Sym8Move[tsym][m]];
+		var tsymx = Sym8Mult[twistx & 7][tsym];
+		twistx >>>= 3;
+		if (UDSliceTwistPrun[twistx * 495 + UDSliceConj[slicex][tsymx]] >= maxl) {
+			continue;
+		}
+		var flipx = FlipMove[flip][Sym8Move[fsym][m]];
+		var fsymx = Sym8Mult[flipx & 7][fsym];
+		flipx >>>= 3;
+		if (TwistFlipPrun[twistx * 2688 + (flipx << 3 | Sym8MultInv[fsymx][tsymx])] >= maxl
+				||UDSliceFlipPrun[flipx * 495 + UDSliceConj[slicex][fsymx]] >= maxl) {
+			continue;
+		}
+		move[length1-maxl] = m;
+		valid1 = Math.min(valid1, length1-maxl);
+		if (phase1(twistx, tsymx, flipx, fsymx, slicex, maxl-1, m)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function init2() {
+//	if (System.currentTimeMillis() > timeOut) {
+//		return true;
+//	}
+	valid2 = Math.min(valid2, valid1);
+	for (var i=valid1; i<length1; i++) {
+		var m = move[i];
+		corn[i+1] = CPermMove[corn[i]][SymMove[csym[i]][m]];
+		csym[i+1] = SymMult[corn[i+1] & 15][csym[i]];
+		corn[i+1] >>>= 4;
+		mid3[i+1] = Mid3Move[mid3[i]][m];
+	}
+	valid1 = length1;
+	var mid = Mid32MPerm[mid3[length1] % 24];
+	var prun = MCPermPrun[corn[length1] * 24 + MPermConj[mid][csym[length1]]];
+	if (prun >= maxlength2) {
+		return false;
+	}
+	for (var i=valid2; i<length1; i++) {
+		e1[i+1] = Mid3Move[e1[i]][move[i]];
+		e2[i+1] = Mid3Move[e2[i]][move[i]];
+	}
+	valid2 = length1;
+	var cornx = corn[length1];
+	var ex = merge[~~(e1[length1]/6)][~~(e2[length1]/6)] * 4032
+				 + e1[length1] * 12 + e2[length1] % 6 * 2 + (((CParity[cornx>>>3]>>>(cornx&7))&1) ^ get4Parity(mid));
+	var edge = MtoEPerm[ex];
+	var esym = edge & 15;
+	edge >>>= 4;
+		prun = Math.max(MEPermPrun[edge * 24 + MPermConj[mid][esym]], prun);
+	if (prun >= maxlength2) {
+		return false;
+	}
+		var lm = length1==0 ? 10 : std2ud[~~(move[length1-1]/3)*3+1];
+	for (var i=prun; i<maxlength2; i++) {
+		if (phase2(edge, esym, corn[length1], csym[length1], mid, i, length1, lm)) {
+			sol = length1 + i;
+			var sb = "";
+			var urf = urfidx;
+//			if (inverse) {
+				urf = (urf + 3) % 6;
+//			}
+			if (urf < 3) {
+				for (var s=0; s<length1; s++) {
+					sb += move2str[urfMove[urf][move[s]]] + ' ';
+				}
+				for (var s=length1; s<sol; s++) {
+					sb += move2str[urfMove[urf][move[s]]] + ' ';
+				}
+			} else {
+				for (var s=sol-1; s>=length1; s--) {
+					sb += move2str[urfMove[urf][move[s]]] + ' ';
+				}
+				for (var s=length1-1; s>=0; s--) {
+					sb += move2str[urfMove[urf][move[s]]] + ' ';
+				}
+			}
+			// sb += "(" + sol + "f)";
+			solution = sb;
+			return true;
+		}
+	}
+	return false;
+}
+
+function phase2(edge, esym, corn, csym, mid, maxl, depth, lm) {
+	if (edge==0 && corn==0 && mid==0) {
+		return true;
+	}
+	for (var m=0; m<10; m++) {
+		if (ckmv2[lm][m]) {
+			continue;
+		}
+		var midx = MPermMove[mid][m];
+		var edgex = EPermMove[edge][SymMoveUD[esym][m]];
+		var esymx = SymMult[edgex & 15][esym];
+		edgex >>>= 4;
+		if (MEPermPrun[edgex * 24 + MPermConj[midx][esymx]] >= maxl) {
+			continue;
+		}
+		var cornx = CPermMove[corn][SymMove[csym][ud2std[m]]];
+		var csymx = SymMult[cornx & 15][csym];
+		cornx >>>= 4;
+		if (MCPermPrun[cornx * 24 + MPermConj[midx][csymx]] >= maxl) {
+			continue;
+		}
+		move[depth] = ud2std[m];
+		if (phase2(edgex, esymx, cornx, csymx, midx, maxl-1, depth+1, m)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+var initialized = false;
+
+function initialize() {
+	if (initialized) {
+		return;
+	}
+	CubieInit();
+	CoordInit();
+	initialized = true;
+}
+
+function solve(c) {
+	initialize();
+	const cc = new CubieCube();
+	cc.cp = c.cp;
+	cc.co = c.co;
+	cc.ep = c.ep;
+	cc.eo = c.eo;
+	return Solve(cc);
+};
+
+module.exports.initialize = initialize;
+module.exports.solve = solve;
+module.exports.randomCube = randomCube;
