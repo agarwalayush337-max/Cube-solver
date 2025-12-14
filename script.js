@@ -1,34 +1,84 @@
-// script.js
+// =====================================================
+// PART 1: WORKER SETUP (The "Brain" of the Solver)
+// =====================================================
 
-const outputDiv = document.getElementById('output');
-const solveBtn = document.getElementById('solveBtn');
-
-// 1. Create the Worker
+// Initialize the worker thread
 const solverWorker = new Worker('worker.js');
+let isSolverReady = false;
 
-// 2. Listen for responses from the Worker
+// Listen for messages from the Worker
 solverWorker.onmessage = function(event) {
     const data = event.data;
 
-    if (data.error) {
-        outputDiv.innerHTML += `<div class="error">Error: ${data.error}</div>`;
-        solveBtn.disabled = false; // Re-enable button
+    // Case A: Worker is ready to solve
+    if (data.status === 'ready') {
+        console.log("✅ Worker: Solver engine is ready!");
+        isSolverReady = true;
+        
+        // Update UI if you have a status element
+        const statusEl = document.getElementById('status');
+        if (statusEl) statusEl.textContent = "System Ready. Click Solve.";
     } 
+    
+    // Case B: Solution Found
     else if (data.success) {
-        outputDiv.innerHTML += `<div class="success">Solution Found: ${data.solution}</div>`;
-        console.log("Moves:", data.solution);
-        solveBtn.disabled = false; // Re-enable button
+        console.log("🎉 Solution Found:", data.solution);
+        
+        // Display solution on screen
+        const outputEl = document.getElementById('output') || document.getElementById('solution-text');
+        if (outputEl) {
+            outputEl.innerText = "Solution: " + data.solution;
+            outputEl.style.color = "green";
+        } else {
+            alert("Solution: " + data.solution);
+        }
+
+        // TODO: IF you have a 3D function, call it here!
+        // animateCube(data.solution);
+    } 
+    
+    // Case C: Error
+    else if (data.error) {
+        console.error("❌ Worker Error:", data.error);
+        alert("Error: " + data.error);
     }
 };
 
-// 3. Handle Button Click
-solveBtn.addEventListener('click', () => {
-    // The specific state from your error log
+// =====================================================
+// PART 2: USER INTERACTION (Button Clicks)
+// =====================================================
+
+// Wait for the page to load
+document.addEventListener('DOMContentLoaded', () => {
+
+    const solveBtn = document.getElementById('solveBtn'); // Ensure your button has id="solveBtn"
+
+    if (solveBtn) {
+        solveBtn.addEventListener('click', () => {
+            handleSolveClick();
+        });
+    } else {
+        console.warn("⚠️ Warning: No button with id='solveBtn' found in index.html");
+    }
+
+});
+
+// Function to handle the solve request
+function handleSolveClick() {
+    if (!isSolverReady) {
+        alert("⚠️ Please wait, solver is still loading...");
+        return;
+    }
+
+    // 1. GET THE CUBE STATE
+    // IMPORTANT: If you lost your 3D code, we must use a test string.
+    // If you have your 3D code, replace the string below with a function like getCubeState()
+    
+    // Test String (Scrambled State)
     const cubeState = "LLLUUUUUURRURRURRUFFFFFFFFFDDDDDDRRRDLLDLLDLLBBBBBBBBB";
     
-    outputDiv.innerHTML = "Status: Solving... (Check Console)";
-    solveBtn.disabled = true; // Disable button while working
+    console.log("Sending state to worker:", cubeState);
     
-    // Send data to worker
+    // 2. SEND TO WORKER
     solverWorker.postMessage(cubeState);
-});
+}
