@@ -312,21 +312,31 @@ function solveCube() {
     setTimeout(() => {
         try {
             // 2. SOLVE using the library
+            // The result is just the string of moves, e.g., "R U R' U'"
             const result = cubeSolver.solve(stateString, 'kociemba');
             
             console.log("Result:", result);
             
-            if (!result || !result.solution) {
-                 // Check if it's already solved
+            // ERROR CHECKING:
+            // If result is empty or null, it failed.
+            if (!result) {
+                 // Check if it's already solved (the solver returns empty string for solved states)
                 const solvedState = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB";
-                if(stateString === solvedState) throw new Error("Cube is already solved!");
+                if(stateString === solvedState) {
+                    statusEl.innerText = "Cube is already solved!";
+                    statusEl.style.color = "#00ff00";
+                    return;
+                }
                 throw new Error("Unsolvable state. Check colors.");
             }
 
-            statusEl.innerText = "Solved! (" + result.solution.split(' ').length + " moves)";
+            // SUCCESS!
+            // We use 'result' directly because it IS the solution string.
+            const movesCount = result.split(' ').length;
+            statusEl.innerText = `Solved! (${movesCount} moves)`;
             statusEl.style.color = "#00ff00";
             
-            parseSolution(result.solution);
+            parseSolution(result); // Pass the string directly
             
             // Switch UI
             document.getElementById('action-controls').style.display = 'none';
@@ -334,9 +344,9 @@ function solveCube() {
             
         } catch (err) {
             console.error(err);
-            statusEl.innerText = err.message.includes("Unsolvable") ? "Invalid Colors" : "Error";
+            statusEl.innerText = "Error: Check Colors";
             statusEl.style.color = "red";
-            alert("Solver Error: " + err.message + "\n\nTip: Make sure you painted all 6 centers correctly and didn't create an impossible block.");
+            alert("Solver Error: " + err.message);
         }
     }, 100);
 }
