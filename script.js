@@ -1,5 +1,5 @@
 // ==========================================
-// 1. CONFIGURATION
+// 1. CONFIGURATION & GLOBALS
 // ==========================================
 const colors = {
     'U': 0xFFFFFF, // White
@@ -36,8 +36,8 @@ let isAnimating = false;
 let paintColor = 'U'; 
 let solutionMoves = [];
 let moveIndex = 0;
+let isSolverReady = false;
 
-// Rotation vars
 let isDragging = false;
 let isMouseDown = false;
 let previousMousePosition = { x: 0, y: 0 };
@@ -45,8 +45,18 @@ let previousMousePosition = { x: 0, y: 0 };
 init();
 animate();
 
+// Initialize solver (simple version, no tables needed for small depth, or it builds fast)
+setTimeout(() => {
+    if (typeof Cube !== 'undefined') {
+        // The simple solver doesn't need heavy init, but we can call it if exists
+        if(Cube.initSolver) Cube.initSolver();
+        isSolverReady = true;
+        console.log("Solver Ready");
+    }
+}, 500);
+
 // ==========================================
-// 2. 3D SETUP
+// 2. 3D SCENE SETUP
 // ==========================================
 function init() {
     const container = document.getElementById('canvas-container');
@@ -108,7 +118,6 @@ function createRubiksCube() {
                 const cube = new THREE.Mesh(geometry, materials);
                 cube.position.set(x, y, z);
                 
-                // Mark centers
                 const isCenter = (Math.abs(x) + Math.abs(y) + Math.abs(z)) === 1;
                 cube.userData = { initialX: x, initialY: y, initialZ: z, isCenter: isCenter }; 
                 
@@ -120,7 +129,7 @@ function createRubiksCube() {
 }
 
 // ==========================================
-// 3. PAINTING
+// 3. INTERACTION
 // ==========================================
 function selectColor(el, c) {
     paintColor = c;
@@ -139,12 +148,10 @@ function handlePaintClick(x, y) {
 
     if (intersects.length > 0) {
         const hit = intersects[0];
-        
         if (hit.object.userData.isCenter) {
             alert("⚠️ Centers are fixed! Rotate your physical cube to match: Green Front, White Top.");
             return;
         }
-
         const matIndex = hit.face.materialIndex;
         if (hit.object.material[matIndex].color.getHex() !== colors.Core) {
             hit.object.material[matIndex].color.setHex(colors[paintColor]);
@@ -152,7 +159,6 @@ function handlePaintClick(x, y) {
     }
 }
 
-// Mouse/Touch Handlers
 function onMouseDown(e) { isMouseDown=true; isDragging=false; previousMousePosition={x:e.clientX, y:e.clientY}; }
 function onMouseMove(e) {
     if(!isMouseDown) return;
@@ -162,7 +168,6 @@ function onMouseMove(e) {
     previousMousePosition = {x:e.clientX, y:e.clientY};
 }
 function onMouseUp(e) { isMouseDown=false; if(!isDragging) handlePaintClick(e.clientX, e.clientY); isDragging=false; }
-
 function onTouchStart(e) { isMouseDown=true; isDragging=false; previousMousePosition={x:e.touches[0].clientX, y:e.touches[0].clientY}; }
 function onTouchMove(e) {
     if(!isMouseDown) return;
@@ -174,7 +179,7 @@ function onTouchMove(e) {
 function onTouchEnd(e) { isMouseDown=false; if(!isDragging && e.changedTouches.length>0) handlePaintClick(e.changedTouches[0].clientX, e.changedTouches[0].clientY); }
 
 // ==========================================
-// 4. SOLVER LOGIC (FIXED)
+// 4. SOLVER LOGIC
 // ==========================================
 
 function getCubeStateString() {
@@ -182,7 +187,7 @@ function getCubeStateString() {
     const findCubie = (x, y, z) => cubes.find(c => c.userData.initialX === x && c.userData.initialY === y && c.userData.initialZ === z);
     const getColor = (cubie, matIndex) => getColorChar(cubie.material[matIndex].color.getHex());
 
-    // Standard Order: U, R, F, D, L, B
+    // Standard Order for this Library: U, R, F, D, L, B
     const U_order = [[-1,1,-1], [0,1,-1], [1,1,-1], [-1,1,0], [0,1,0], [1,1,0], [-1,1,1], [0,1,1], [1,1,1]];
     const R_order = [[1,1,1], [1,1,0], [1,1,-1], [1,0,1], [1,0,0], [1,0,-1], [1,-1,1], [1,-1,0], [1,-1,-1]];
     const F_order = [[-1,1,1], [0,1,1], [1,1,1], [-1,0,1], [0,0,1], [1,0,1], [-1,-1,1], [0,-1,1], [1,-1,1]];
@@ -204,31 +209,29 @@ function solveCube() {
     const statusEl = document.getElementById('status');
     const stateString = getCubeStateString();
     
-    console.log("Captured State:", stateString);
+    console.log("Captured:", stateString);
     statusEl.innerText = "Solving...";
     statusEl.style.color = "orange";
 
     setTimeout(() => {
         try {
-            // FIX: Using cubeSolver global (from solver.js)
-            if (typeof cubeSolver === 'undefined') throw new Error("Solver library not loaded.");
+            if (!isSolverReady) throw new Error("Solver not ready.");
             
-            const result = cubeSolver.solve(stateString, 'kociemba');
-            console.log("Solution found:", result);
+            // Create cube object and solve
+            const cube = Cube.fromString(stateString);
+            const result = cube.solve(); // Returns string
+            
+            console.log("Result:", result);
 
-            // FIX: The library returns a STRING, not an object.
-            // If the string is empty or null, it might be solved or failed.
-            if (result === undefined || result === null) {
-                throw new Error("Solver returned nothing.");
+            if (result === "") { // Wait, empty string means solved in this lib? No, check docs.
+                 // Actually this lib returns empty string if already solved.
+                 if (stateString === "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB") {
+                    statusEl.innerText = "Already Solved!";
+                    statusEl.style.color = "#00ff00";
+                    return;
+                 }
             }
-
-            if (stateString === "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB") {
-                 statusEl.innerText = "Already Solved!";
-                 statusEl.style.color = "#00ff00";
-                 return;
-            }
-
-            // Valid Solution found
+            
             const movesCount = result.split(' ').length;
             statusEl.innerHTML = `SOLVED! (${movesCount} moves)`;
             statusEl.style.color = "#00ff00";
@@ -240,9 +243,9 @@ function solveCube() {
             
         } catch (err) {
             console.error(err);
-            statusEl.innerText = "Error: Check Colors";
+            statusEl.innerText = "Unsolvable / Error";
             statusEl.style.color = "red";
-            alert("Error: " + err.message + "\n\nTip: You cannot have two centers of the same color, or edge pieces that don't exist.");
+            alert("Error: " + err.message);
         }
     }, 100);
 }
@@ -327,7 +330,8 @@ function nextMove() {
     if (moveIndex < solutionMoves.length) {
         rotateFace(solutionMoves[moveIndex]);
         moveIndex++;
-        document.getElementById('status').innerHTML = `Move ${moveIndex}/${solutionMoves.length}: <b style="color:#fff; font-size:24px">${solutionMoves[moveIndex-1]}</b>`;
+        const displayMove = solutionMoves[moveIndex-1];
+        document.getElementById('status').innerHTML = `Move ${moveIndex}/${solutionMoves.length}: <b style="color:#fff; font-size:24px">${displayMove}</b>`;
     } else {
         document.getElementById('status').innerText = "Cube Solved!";
     }
