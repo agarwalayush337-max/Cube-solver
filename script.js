@@ -24,7 +24,7 @@ let isDragging = false, isMouseDown = false, previousMousePosition = { x: 0, y: 
 
 // --- WORKER SETUP ---
 const statusEl = document.getElementById('status');
-statusEl.innerHTML = "Initializing Engine...<br><span style='font-size:12px;color:#aaa'>This takes 1-2 mins. Please paint cube while waiting.</span>";
+statusEl.innerText = "Loading Engine..."; 
 statusEl.style.color = "orange";
 
 const solverWorker = new Worker('worker.js');
@@ -34,18 +34,27 @@ solverWorker.onmessage = function(e) {
     const data = e.data;
     if (data.type === 'status' && data.text === 'ready') {
         engineReady = true;
-        statusEl.innerText = "Engine Ready! Click Solve.";
+        statusEl.innerText = "Ready! Paint & Solve.";
         statusEl.style.color = "#00ff00";
     } 
     else if (data.type === 'solution') {
-        const result = data.solution || "";
-        // Check for 'Already Solved' case
-        if (result === "" && getCubeStateString() === "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB") {
-            statusEl.innerText = "Already Solved!";
+        let result = data.solution;
+        
+        // Handle Empty Result (Already Solved)
+        if (result === undefined || result === null) {
+             statusEl.innerText = "Error / Unsolvable";
+             statusEl.style.color = "red";
+        } else if (result.trim() === "") {
+             statusEl.innerText = "Already Solved!";
+             statusEl.style.color = "#00ff00";
         } else {
-            const movesCount = result.split(' ').length;
+            // Clean up solution string
+            result = result.trim();
+            const movesCount = result.split(/\s+/).length;
+            
             statusEl.innerHTML = `SOLVED! (${movesCount} moves)`;
             statusEl.style.color = "#00ff00";
+            
             parseSolution(result);
             document.getElementById('action-controls').style.display = 'none';
             document.getElementById('playback-controls').style.display = 'flex';
@@ -134,7 +143,6 @@ function handlePaintClick(x, y) {
     }
 }
 
-// Input Handlers
 function onMouseDown(e){isMouseDown=true;isDragging=false;previousMousePosition={x:e.clientX,y:e.clientY}}
 function onMouseMove(e){if(!isMouseDown)return;const d={x:e.clientX-previousMousePosition.x,y:e.clientY-previousMousePosition.y};if(Math.abs(d.x)>2||Math.abs(d.y)>2)isDragging=true;if(isDragging){pivotGroup.rotation.y+=d.x*0.005;pivotGroup.rotation.x+=d.y*0.005}previousMousePosition={x:e.clientX,y:e.clientY}}
 function onMouseUp(e){isMouseDown=false;if(!isDragging)handlePaintClick(e.clientX,e.clientY);isDragging=false}
@@ -168,7 +176,7 @@ function solveCube() {
     console.log("Captured:", stateString);
     
     if (!engineReady) {
-        alert("The Solver Engine is still initializing (it takes 1-2 mins on mobile). Please wait for green 'Engine Ready' status.");
+        alert("Engine loading... wait 1 second.");
         return;
     }
     
