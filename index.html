@@ -3,381 +3,440 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Video Replica Solver</title>
+    <title>3D Master Solver</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/cube.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <style>
-        /* --- 1. EXACT VIDEO LAYOUT STYLES --- */
-        body { margin: 0; background: #000; height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-family: sans-serif; }
+        body { margin: 0; background: #111; color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         
-        /* Top Half: Camera */
-        #camera-container {
-            flex: 60; position: relative; overflow: hidden; background: #000;
-        }
-        #video-feed {
-            width: 100%; height: 100%; object-fit: cover;
-            transform: scaleX(1); /* No Mirroring for Rear Camera */
-        }
+        #canvas-container { width: 100vw; height: 65vh; background: #000; position: relative; }
         
-        /* The Green Grid from the video */
-        #scan-grid {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 260px; height: 260px;
-            display: grid; grid-template-columns: repeat(3, 1fr);
-            border: 4px solid #00FF00;
-            box-shadow: 0 0 15px #00FF00;
-            z-index: 10;
-        }
-        .grid-cell { border: 1px solid rgba(0, 255, 0, 0.3); position: relative; }
-        
-        /* The "Dot" that shows detected color */
-        .color-dot {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 12px; height: 12px; border-radius: 50%;
-            border: 1px solid white; box-shadow: 0 0 4px black;
-            background: transparent;
+        /* UI OVERLAY */
+        #ui-layer {
+            height: 35vh; background: #1a1a1a; display: flex; flex-direction: column;
+            padding: 10px; box-sizing: border-box; border-top: 2px solid #333;
         }
 
-        /* Scan Status Pill */
-        #status-pill {
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.7); color: white; padding: 8px 16px; border-radius: 20px;
-            font-weight: bold; border: 1px solid #444; pointer-events: none;
+        /* PALETTE */
+        #palette {
+            display: flex; justify-content: center; gap: 15px; margin-bottom: 15px;
         }
+        .color-btn {
+            width: 40px; height: 40px; border-radius: 50%; border: 3px solid #333;
+            cursor: pointer; transition: transform 0.2s;
+        }
+        .color-btn.active { transform: scale(1.2); border-color: white; box-shadow: 0 0 10px white; }
 
-        /* Bottom Half: 3D Cube & Controls */
-        #controls-container {
-            flex: 40; background: #111; display: flex; flex-direction: column;
-            border-top: 2px solid #333;
+        /* CONTROLS */
+        #controls-area {
+            flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
         
-        #three-view { flex: 1; width: 100%; position: relative; }
+        button.action-btn {
+            background: white; color: black; border: none; padding: 12px 40px;
+            font-size: 18px; font-weight: 800; border-radius: 30px;
+            text-transform: uppercase; cursor: pointer;
+        }
         
-        /* Face Selector Bar */
-        #face-bar {
-            display: flex; justify-content: space-around; padding: 10px; background: #000;
+        /* PLAYER (Hidden initially) */
+        #player {
+            display: none; width: 100%; flex-direction: column; align-items: center;
         }
-        .face-btn {
-            background: none; border: none; color: #555; font-weight: 900; font-size: 14px; padding: 10px;
+        #move-display { font-size: 30px; font-family: monospace; color: #00ff00; margin-bottom: 10px; font-weight: bold; }
+        
+        .transport-btns { display: flex; gap: 20px; margin-bottom: 10px; }
+        .t-btn {
+            background: #333; color: white; border: 1px solid #555; width: 50px; height: 50px;
+            border-radius: 12px; font-size: 20px; cursor: pointer; display: flex; justify-content: center; align-items: center;
         }
-        .face-btn.active { color: #00FF00; border-bottom: 2px solid #00FF00; }
-        .face-btn.done { color: white; }
+        
+        /* SLIDER */
+        input[type=range] { width: 90%; accent-color: #00ff00; }
 
-        /* Main Button */
-        #action-btn {
-            width: 90%; margin: 10px auto; padding: 15px; border: none; border-radius: 8px;
-            background: white; font-weight: 800; font-size: 18px; text-transform: uppercase;
+        #help-text {
+            position: absolute; top: 10px; width: 100%; text-align: center;
+            pointer-events: none; text-shadow: 0 2px 4px black; opacity: 0.7;
         }
-        #solve-btn { display: none; background: #007AFF; color: white; width: 90%; margin: 10px auto; padding: 15px; border: none; border-radius: 8px; font-weight: 800; font-size: 18px; }
-
     </style>
 </head>
 <body>
 
-    <div id="camera-container">
-        <video id="video-feed" autoplay playsinline muted></video>
-        <div id="status-pill">Align Center: WHITE</div>
-        
-        <div id="scan-grid">
-            <div class="grid-cell"><div class="color-dot" id="d0"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d1"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d2"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d3"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d4"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d5"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d6"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d7"></div></div>
-            <div class="grid-cell"><div class="color-dot" id="d8"></div></div>
-        </div>
-        <canvas id="cv-canvas" style="display:none"></canvas>
+    <div id="canvas-container">
+        <div id="help-text">Select Color -> Tap Cube to Paint</div>
     </div>
 
-    <div id="controls-container">
-        <div id="three-view"></div>
-        
-        <div id="face-bar">
-            <button class="face-btn active" onclick="setFace('U')">UP</button>
-            <button class="face-btn" onclick="setFace('L')">LT</button>
-            <button class="face-btn" onclick="setFace('F')">FR</button>
-            <button class="face-btn" onclick="setFace('R')">RT</button>
-            <button class="face-btn" onclick="setFace('B')">BK</button>
-            <button class="face-btn" onclick="setFace('D')">DN</button>
-        </div>
+    <div id="ui-layer">
+        <div id="palette">
+            <div class="color-btn active" style="background:#FFFFFF" onclick="setColor('U')"></div> <div class="color-btn" style="background:#009E60" onclick="setColor('F')"></div> <div class="color-btn" style="background:#B90000" onclick="setColor('R')"></div> <div class="color-btn" style="background:#0045AD" onclick="setColor('B')"></div> <div class="color-btn" style="background:#FF5800" onclick="setColor('L')"></div> <div class="color-btn" style="background:#FFD500" onclick="setColor('D')"></div> </div>
 
-        <button id="action-btn" onclick="capture()">CAPTURE</button>
-        <button id="solve-btn" onclick="solve()">SOLVE CUBE</button>
+        <div id="controls-area">
+            <button id="solve-btn" class="action-btn" onclick="startSolve()">SOLVE</button>
+            
+            <div id="player">
+                <div id="move-display">READY</div>
+                <div class="transport-btns">
+                    <button class="t-btn" onclick="playPause()" id="play-btn">▶</button>
+                    <button class="t-btn" onclick="step(-1)">⏮</button>
+                    <button class="t-btn" onclick="step(1)">⏭</button>
+                    <button class="t-btn" onclick="resetCube()">↺</button>
+                </div>
+                <input type="range" id="progress" min="0" max="0" value="0" oninput="scrub(this.value)">
+            </div>
+        </div>
     </div>
+
+    <script id="worker-code" type="javascript/worker">
+        importScripts('https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/cube.min.js');
+        self.onmessage = function(e) {
+            Cube.initSolver();
+            const solver = new Cube();
+            try {
+                // Input format: UUU...RRR...FFF...DDD...LLL...BBB
+                const sol = solver.solve(Cube.fromString(e.data));
+                self.postMessage({success: true, solution: sol});
+            } catch(err) {
+                self.postMessage({success: false, error: "Invalid Cube State"});
+            }
+        };
+    </script>
 
     <script>
-        // --- CONFIGURATION ---
+        // --- 1. CONFIGURATION ---
         const COLORS = {
-            'U': '#FFFFFF', 'R': '#B90000', 'F': '#009E60',
-            'D': '#FFD500', 'L': '#FF5800', 'B': '#0045AD'
+            'U': 0xFFFFFF, 'F': 0x009E60, 'R': 0xB90000,
+            'B': 0x0045AD, 'L': 0xFF5800, 'D': 0xFFD500, 'G': 0x333333 // Grey
         };
-        const FACE_ORDER = ['U', 'L', 'F', 'R', 'B', 'D']; // Scan flow
-        let currentFace = 'U';
-        let cubeState = { 'U':[], 'L':[], 'F':[], 'R':[], 'B':[], 'D':[] };
-        let liveColors = Array(9).fill('U');
+        const FACE_MAP = {0:'R', 1:'L', 2:'U', 3:'D', 4:'F', 5:'B'}; // Material Indices
+
+        let selectedColor = 'U';
+        let isSolving = false;
+        let solution = [];
+        let currentStep = 0;
+        let isPlaying = false;
+        let animationSpeed = 500; // ms per move
 
         // THREE.JS VARS
-        let scene, camera, renderer, cubeGroup;
-        let faceMaterials = {}; // Stores references to the 54 materials for instant updates
+        let scene, camera, renderer, controls;
+        let cubies = []; // Array of 27 meshes
+        let pivot; // For rotation animation
 
-        // --- 1. STARTUP ---
-        window.onload = function() {
-            initCamera();
-            init3D();
-            setFace('U');
-            requestAnimationFrame(scanLoop);
-        };
+        // --- 2. INITIALIZATION ---
+        window.onload = init;
 
-        async function initCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-                });
-                const video = document.getElementById('video-feed');
-                video.srcObject = stream;
-                video.play();
-            } catch (err) { alert("Camera access failed: " + err); }
-        }
-
-        // --- 2. THE VISION ENGINE (HSV + Brightness Fix) ---
-        function scanLoop() {
-            const video = document.getElementById('video-feed');
-            const canvas = document.getElementById('cv-canvas');
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                ctx.drawImage(video, 0, 0);
-
-                // Grid Math
-                const size = Math.min(canvas.width, canvas.height) * 0.55;
-                const startX = (canvas.width - size) / 2;
-                const startY = (canvas.height - size) / 2;
-                const step = size / 3;
-
-                // Scan 9 points
-                for (let i = 0; i < 9; i++) {
-                    const r = Math.floor(i / 3);
-                    const c = i % 3;
-                    const x = startX + c * step + step / 2;
-                    const y = startY + r * step + step / 2;
-
-                    const p = ctx.getImageData(x, y, 1, 1).data;
-                    const colorCode = detectColor(p[0], p[1], p[2]);
-                    
-                    liveColors[i] = colorCode;
-                    
-                    // Update HTML Dots
-                    document.getElementById('d'+i).style.backgroundColor = COLORS[colorCode];
-                }
-                
-                // Update 3D Cube immediately
-                update3D();
-            }
-            requestAnimationFrame(scanLoop);
-        }
-
-        function detectColor(r, g, b) {
-            // Convert to HSV
-            let rr=r/255, gg=g/255, bb=b/255;
-            let max=Math.max(rr,gg,bb), min=Math.min(rr,gg,bb);
-            let h, s, v=max;
-            let d = max - min;
-            s = max==0 ? 0 : d/max;
-            if(max==min) h=0;
-            else {
-                switch(max){
-                    case rr: h=(gg-bb)/d+(gg<bb?6:0); break;
-                    case gg: h=(bb-rr)/d+2; break;
-                    case bb: h=(rr-gg)/d+4; break;
-                }
-                h/=6;
-            }
-
-            // --- ROBUST THRESHOLDS ---
-            // 1. WHITE (Low Saturation)
-            if (s < 0.20 && v > 0.3) return 'U';
+        function init() {
+            const container = document.getElementById('canvas-container');
             
-            // 2. ORANGE vs RED vs YELLOW
-            if (v > 0.2) {
-                // Yellow is usually bright and around 0.14-0.18
-                if (h > 0.12 && h < 0.22) return 'D'; 
-                
-                // Orange is distinctly around 0.06 - 0.11
-                if (h >= 0.06 && h <= 0.12) return 'L';
-                
-                // Red is at the edges (0.0 - 0.05 OR 0.95 - 1.0)
-                if (h < 0.06 || h > 0.90) return 'R';
-            }
-            
-            // 3. GREEN vs BLUE
-            if (h > 0.22 && h < 0.48) return 'F'; // Green
-            if (h > 0.50 && h < 0.75) return 'B'; // Blue
-            
-            return 'U'; // Fallback
-        }
-
-        // --- 3. 3D SYSTEM (HARDCODED MAPPING) ---
-        function init3D() {
-            const container = document.getElementById('three-view');
+            // Scene Setup
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x111111);
             
-            camera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.1, 100);
-            camera.position.z = 5; 
-            
-            renderer = new THREE.WebGLRenderer({antialias:true});
-            renderer.setSize(container.clientWidth, container.clientHeight);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / (window.innerHeight*0.65), 0.1, 100);
+            camera.position.set(5, 5, 7);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight * 0.65);
             container.appendChild(renderer.domElement);
 
-            cubeGroup = new THREE.Group();
-            const geometry = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+            // Controls (Orbit)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enablePan = false;
+            controls.enableDamping = true;
 
-            // Create 27 Cubies
-            // We give them IDs to map them to faces later
-            let id = 0;
-            for(let x=-1; x<=1; x++) {
-                for(let y=-1; y<=1; y++) {
-                    for(let z=-1; z<=1; z++) {
-                        const mats = [];
-                        for(let i=0; i<6; i++) {
-                            const mat = new THREE.MeshBasicMaterial({color: 0x222222});
-                            mats.push(mat);
-                            
-                            // Store reference based on position and normal
-                            // 0:Right, 1:Left, 2:Top, 3:Bottom, 4:Front, 5:Back
-                            let key = null;
-                            if(i==0 && x==1) key = `R_${9 - (3*(y+1)) - (z+1)}`; // Complex map logic simplified below
-                            // ... Mapping algorithmic is error prone.
-                            // We will use a direct update in update3D()
-                        }
-                        const mesh = new THREE.Mesh(geometry, mats);
-                        mesh.position.set(x, y, z);
-                        mesh.userData = {x,y,z};
-                        cubeGroup.add(mesh);
-                    }
+            // Build Cube
+            buildCube();
+
+            // Raycaster for Clicking
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
+            renderer.domElement.addEventListener('pointerdown', (event) => {
+                if(isSolving) return; // Lock painting during solve
+                
+                // Calculate mouse position
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(cubies);
+
+                if (intersects.length > 0) {
+                    controls.enabled = false; // Disable rotation while painting
+                    const hit = intersects[0];
+                    const mesh = hit.object;
+                    const materialIndex = hit.face.materialIndex;
+                    
+                    // Apply Color
+                    mesh.material[materialIndex].color.setHex(COLORS[selectedColor]);
+                    
+                    // Store logical color in userData for solver
+                    mesh.userData.faceColors[materialIndex] = selectedColor;
                 }
-            }
-            scene.add(cubeGroup);
-            
-            function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+            });
+
+            renderer.domElement.addEventListener('pointerup', () => controls.enabled = true);
+
+            // Loop
             animate();
         }
 
-        // THIS IS THE FIX: Explicitly map the 9 scanned colors to the specific 3D faces
-        // No sorting. Just Physics.
-        function update3D() {
-            // Depending on currentFace, we know EXACTLY which cubies to paint.
-            // We filter the group children by x,y,z coordinates.
-            
-            // 1. Get the 9 meshes for the current face
-            let targets = [];
-            const kids = cubeGroup.children;
-            
-            if(currentFace === 'F') { // Front (z=1)
-                // Grid 0(TopLeft) is x=-1, y=1. Grid 8(BotRight) is x=1, y=-1
-                targets = kids.filter(m => m.userData.z === 1);
-                targets.sort((a,b) => (b.userData.y - a.userData.y) || (a.userData.x - b.userData.x));
-                paint(targets, 4); // Material 4 is Front
-            }
-            else if(currentFace === 'B') { // Back (z=-1)
-                targets = kids.filter(m => m.userData.z === -1);
-                // Back is mirrored horizontally relative to camera usually
-                targets.sort((a,b) => (b.userData.y - a.userData.y) || (b.userData.x - a.userData.x));
-                paint(targets, 5); // Mat 5 Back
-            }
-            else if(currentFace === 'U') { // Up (y=1)
-                targets = kids.filter(m => m.userData.y === 1);
-                targets.sort((a,b) => (a.userData.z - b.userData.z) || (a.userData.x - b.userData.x));
-                paint(targets, 2); // Mat 2 Top
-            }
-            else if(currentFace === 'D') { // Down (y=-1)
-                targets = kids.filter(m => m.userData.y === -1);
-                targets.sort((a,b) => (b.userData.z - a.userData.z) || (a.userData.x - b.userData.x));
-                paint(targets, 3); // Mat 3 Bottom
-            }
-            else if(currentFace === 'L') { // Left (x=-1)
-                targets = kids.filter(m => m.userData.x === -1);
-                targets.sort((a,b) => (b.userData.y - a.userData.y) || (a.userData.z - b.userData.z));
-                paint(targets, 1); // Mat 1 Left
-            }
-            else if(currentFace === 'R') { // Right (x=1)
-                targets = kids.filter(m => m.userData.x === 1);
-                targets.sort((a,b) => (b.userData.y - a.userData.y) || (b.userData.z - a.userData.z));
-                paint(targets, 0); // Mat 0 Right
+        function buildCube() {
+            const geo = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+            pivot = new THREE.Object3D(); // Helper for rotations
+            scene.add(pivot);
+
+            for(let x=-1; x<=1; x++) {
+                for(let y=-1; y<=1; y++) {
+                    for(let z=-1; z<=1; z++) {
+                        // Default to Grey, we will paint "solved" state initially
+                        const mats = Array(6).fill(null).map(() => new THREE.MeshBasicMaterial({color: COLORS['G']}));
+                        const mesh = new THREE.Mesh(geo, mats);
+                        mesh.position.set(x, y, z);
+                        
+                        // Logical Data
+                        mesh.userData = { 
+                            startPos: new THREE.Vector3(x,y,z), // To track position
+                            faceColors: {0:'G',1:'G',2:'G',3:'G',4:'G',5:'G'} 
+                        };
+
+                        // Pre-paint a solved cube for convenience? 
+                        // User asked to "Manually fill". So we leave it grey or pre-fill solved?
+                        // Let's pre-fill Solved so they just have to change the scrambled parts.
+                        paintSticker(mesh, x, y, z);
+
+                        cubies.push(mesh);
+                        scene.add(mesh);
+                    }
+                }
             }
         }
+
+        function paintSticker(mesh, x, y, z) {
+            // Helper to paint default solved state
+            if(x===1) { mesh.material[0].color.setHex(COLORS['R']); mesh.userData.faceColors[0] = 'R'; }
+            if(x===-1){ mesh.material[1].color.setHex(COLORS['L']); mesh.userData.faceColors[1] = 'L'; }
+            if(y===1) { mesh.material[2].color.setHex(COLORS['U']); mesh.userData.faceColors[2] = 'U'; }
+            if(y===-1){ mesh.material[3].color.setHex(COLORS['D']); mesh.userData.faceColors[3] = 'D'; }
+            if(z===1) { mesh.material[4].color.setHex(COLORS['F']); mesh.userData.faceColors[4] = 'F'; }
+            if(z===-1){ mesh.material[5].color.setHex(COLORS['B']); mesh.userData.faceColors[5] = 'B'; }
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            TWEEN.update(time);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- 3. UI LOGIC ---
+        function setColor(c) {
+            selectedColor = c;
+            // Update UI Highlight
+            document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+            const btn = Array.from(document.querySelectorAll('.color-btn')).find(b => b.style.background.includes(getColorHexStr(c)));
+            // Simple visual hack for selection
+            event.target.classList.add('active');
+        }
         
-        function paint(meshes, matIndex) {
-            liveColors.forEach((color, i) => {
-                if(meshes[i]) meshes[i].material[matIndex].color.set(COLORS[color]);
+        function getColorHexStr(c) {
+            if(c==='U') return '255, 255, 255'; // White
+            if(c==='R') return '185, 0, 0';
+            // ... simple check, or just rely on click event
+            return '';
+        }
+
+        // --- 4. SOLVER LOGIC ---
+        function startSolve() {
+            // 1. Read State from 3D Meshes
+            // We need to construct the string: U... R... F... D... L... B...
+            // Scan positions based on World Coordinates
+            
+            const getFaceStr = (face) => {
+                // Filter cubies based on world position
+                let faceCubies = [];
+                // Sort order is crucial: Top-Left to Bottom-Right
+                
+                if(face==='U') {
+                    faceCubies = cubies.filter(m => Math.abs(m.position.y - 1) < 0.1);
+                    faceCubies.sort((a,b) => (a.position.z - b.position.z) || (a.position.x - b.position.x));
+                    return faceCubies.map(m => m.userData.faceColors[2]).join('');
+                }
+                if(face==='D') {
+                    faceCubies = cubies.filter(m => Math.abs(m.position.y + 1) < 0.1);
+                    faceCubies.sort((a,b) => (b.position.z - a.position.z) || (a.position.x - b.position.x));
+                    return faceCubies.map(m => m.userData.faceColors[3]).join('');
+                }
+                if(face==='F') {
+                    faceCubies = cubies.filter(m => Math.abs(m.position.z - 1) < 0.1);
+                    faceCubies.sort((a,b) => (b.position.y - a.position.y) || (a.position.x - b.position.x));
+                    return faceCubies.map(m => m.userData.faceColors[4]).join('');
+                }
+                if(face==='B') {
+                    faceCubies = cubies.filter(m => Math.abs(m.position.z + 1) < 0.1);
+                    faceCubies.sort((a,b) => (b.position.y - a.position.y) || (b.position.x - a.position.x));
+                    return faceCubies.map(m => m.userData.faceColors[5]).join('');
+                }
+                if(face==='L') {
+                    faceCubies = cubies.filter(m => Math.abs(m.position.x + 1) < 0.1);
+                    faceCubies.sort((a,b) => (b.position.y - a.position.y) || (a.position.z - b.position.z));
+                    return faceCubies.map(m => m.userData.faceColors[1]).join('');
+                }
+                if(face==='R') {
+                    faceCubies = cubies.filter(m => Math.abs(m.position.x - 1) < 0.1);
+                    faceCubies.sort((a,b) => (b.position.y - a.position.y) || (b.position.z - a.position.z));
+                    return faceCubies.map(m => m.userData.faceColors[0]).join('');
+                }
+            };
+
+            const state = getFaceStr('U') + getFaceStr('R') + getFaceStr('F') + getFaceStr('D') + getFaceStr('L') + getFaceStr('B');
+            
+            // Check for Grey (Unpainted)
+            if(state.includes('G')) { alert("Please paint the whole cube first!"); return; }
+
+            console.log("Solving State:", state);
+
+            // 2. Call Worker
+            const blob = new Blob([document.querySelector('#worker-code').textContent], { type: "text/javascript" });
+            const worker = new Worker(window.URL.createObjectURL(blob));
+            
+            worker.postMessage(state);
+            worker.onmessage = (e) => {
+                if(e.data.success) {
+                    // Normalize solution string
+                    let moves = e.data.solution.trim();
+                    // Fix double spaces or empty strings
+                    if(moves === "") { alert("Cube is already solved!"); return; }
+                    
+                    // Parse moves into array (handles '2' and "'" modifiers)
+                    // Kociemba output is usually space separated: R U2 D'
+                    solution = moves.split(/\s+/);
+                    
+                    // Setup Player
+                    isSolving = true;
+                    document.getElementById('solve-btn').style.display = 'none';
+                    document.getElementById('palette').style.display = 'none';
+                    document.getElementById('player').style.display = 'flex';
+                    document.getElementById('progress').max = solution.length;
+                    
+                    currentStep = 0;
+                    updateUI();
+                } else {
+                    alert("Invalid Cube Configuration! Check your colors.");
+                }
+            };
+        }
+
+        // --- 5. ANIMATION ENGINE (THE "GOOD MODEL" PART) ---
+        
+        function rotateFace(move, duration = 300) {
+            return new Promise(resolve => {
+                const face = move[0];
+                const modifier = move[1] || '';
+                const isPrime = modifier === "'";
+                const isDouble = modifier === '2';
+                
+                let angle = Math.PI / 2 * (isPrime ? 1 : -1);
+                if(isDouble) angle *= 2;
+
+                // 1. Group Cubies
+                let axis = new THREE.Vector3();
+                let group = [];
+                
+                if(face === 'U') { axis.set(0,1,0); group = cubies.filter(c => c.position.y > 0.5); }
+                if(face === 'D') { axis.set(0,1,0); group = cubies.filter(c => c.position.y < -0.5); }
+                if(face === 'F') { axis.set(0,0,1); group = cubies.filter(c => c.position.z > 0.5); }
+                if(face === 'B') { axis.set(0,0,1); group = cubies.filter(c => c.position.z < -0.5); }
+                if(face === 'R') { axis.set(1,0,0); group = cubies.filter(c => c.position.x > 0.5); }
+                if(face === 'L') { axis.set(1,0,0); group = cubies.filter(c => c.position.x < -0.5); }
+
+                // 2. Attach to Pivot
+                pivot.rotation.set(0,0,0);
+                pivot.position.set(0,0,0);
+                
+                group.forEach(c => {
+                    pivot.attach(c); // Three.js 'attach' maintains world transform
+                });
+
+                // 3. Tween Rotation
+                new TWEEN.Tween(pivot.rotation)
+                    .to({ [axis.x ? 'x' : axis.y ? 'y' : 'z']: pivot.rotation[axis.x ? 'x' : axis.y ? 'y' : 'z'] + angle }, duration)
+                    .easing(TWEEN.Easing.Quadratic.InOut)
+                    .onComplete(() => {
+                        // 4. Detach (Bake transforms)
+                        group.forEach(c => scene.attach(c));
+                        pivot.rotation.set(0,0,0);
+                        
+                        // Round positions to fix floating point drift
+                        group.forEach(c => {
+                            c.position.x = Math.round(c.position.x);
+                            c.position.y = Math.round(c.position.y);
+                            c.position.z = Math.round(c.position.z);
+                            c.updateMatrixWorld();
+                        });
+                        resolve();
+                    })
+                    .start();
             });
         }
 
-        // --- 4. APP CONTROL ---
-        function setFace(face) {
-            currentFace = face;
-            
-            // UI
-            document.querySelectorAll('.face-btn').forEach(b => b.classList.remove('active'));
-            const btn = Array.from(document.querySelectorAll('.face-btn')).find(b => b.innerText.includes(face=='L'?'LT':face=='R'?'RT':face=='F'?'FR':face=='B'?'BK':face=='U'?'UP':'DN'));
-            if(btn) btn.classList.add('active');
-            
-            document.getElementById('status-pill').innerText = `Align Center: ${getFaceName(face)}`;
-
-            // Rotate Cube View
-            rotateView(face);
-        }
+        // --- 6. PLAYBACK CONTROLS ---
         
-        function getFaceName(f) {
-            return {'U':'WHITE','F':'GREEN','R':'RED','L':'ORANGE','B':'BLUE','D':'YELLOW'}[f];
+        async function playPause() {
+            isPlaying = !isPlaying;
+            document.getElementById('play-btn').innerText = isPlaying ? "⏸" : "▶";
+            
+            if(isPlaying) {
+                while(currentStep < solution.length && isPlaying) {
+                    updateUI();
+                    await rotateFace(solution[currentStep], animationSpeed);
+                    currentStep++;
+                    document.getElementById('progress').value = currentStep;
+                }
+                if(currentStep >= solution.length) isPlaying = false;
+                document.getElementById('play-btn').innerText = "▶";
+            }
         }
 
-        function rotateView(face) {
-            cubeGroup.rotation.set(0,0,0);
-            if(face==='U') cubeGroup.rotation.x = 0.5;
-            if(face==='D') cubeGroup.rotation.x = -0.5;
-            if(face==='R') cubeGroup.rotation.y = -0.5; // Slight angle to see depth
-            if(face==='L') cubeGroup.rotation.y = 0.5;
-            if(face==='B') cubeGroup.rotation.y = 3.14;
+        async function step(dir) {
+            if(isPlaying) return; // Block step while playing
+            
+            if(dir === 1 && currentStep < solution.length) {
+                await rotateFace(solution[currentStep], 200);
+                currentStep++;
+            } 
+            else if(dir === -1 && currentStep > 0) {
+                currentStep--;
+                // Reverse Move logic
+                let move = solution[currentStep];
+                let rev = move.includes("'") ? move[0] : (move.includes("2") ? move : move[0] + "'");
+                await rotateFace(rev, 200);
+            }
+            updateUI();
+            document.getElementById('progress').value = currentStep;
         }
 
-        function capture() {
-            cubeState[currentFace] = [...liveColors];
-            
-            // Mark Done
-            const btn = document.querySelector('.face-btn.active');
-            btn.classList.add('done');
-            
-            // Next
-            const idx = FACE_ORDER.indexOf(currentFace);
-            if(idx < 5) {
-                setFace(FACE_ORDER[idx+1]);
+        function updateUI() {
+            if(currentStep < solution.length) {
+                document.getElementById('move-display').innerText = "Move: " + solution[currentStep];
             } else {
-                document.getElementById('action-btn').style.display = 'none';
-                document.getElementById('solve-btn').style.display = 'block';
+                document.getElementById('move-display').innerText = "SOLVED!";
             }
         }
-        
-        function solve() {
-            let str = "";
-            ['U','R','F','D','L','B'].forEach(f => str += cubeState[f].join(''));
-            
-            alert("Calculating Solution for: " + str);
-            
-            const worker = new Worker('solver-worker.js');
-            worker.postMessage(str);
-            worker.onmessage = (e) => {
-                if(e.data.success) alert("Solution: " + e.data.solution);
-                else alert("Error: " + e.data.error);
-            }
+
+        function scrub(val) {
+            // Complex to implement scrubbing because moves depend on state.
+            // For now, simple step is safer. Reset if scrub back to 0.
+            if(val == 0 && currentStep > 0) resetCube();
         }
+
+        function resetCube() {
+            location.reload();
+        }
+
     </script>
 </body>
 </html>
