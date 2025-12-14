@@ -1,44 +1,31 @@
-// worker.js
+// worker.js - Runs locally
+importScripts('cube.js'); 
 
-// 1. FORCE load the FULL version from the web (contains the Solver)
-importScripts('https://unpkg.com/cubejs@1.3.2/lib/cube.js');
+let isReady = false;
 
-let isSolverReady = false;
-
-// 2. Initialize the Solver
+// Initialize
 try {
-    // Check if the function exists before calling it
-    if (typeof Cube !== 'undefined' && typeof Cube.initSolver === 'function') {
-        console.log("Worker: Building solver tables (this takes 2-5s)...");
-        Cube.initSolver(); 
-        isSolverReady = true;
-        self.postMessage({ status: 'ready' }); // Tell script.js we are ready
-    } else {
-        // This log will appear if you somehow still have the Lite version
-        console.error("Worker Error: Loaded 'Cube', but 'initSolver' is missing. You are using the Lite version!");
+    if (typeof Cube !== 'undefined') {
+        Cube.initSolver(); // Heavy calculation
+        isReady = true;
+        self.postMessage({ type: 'ready' });
     }
-} catch (e) {
-    console.error("Worker Initialization Error:", e);
-}
+} catch (e) { console.error(e); }
 
-// 3. Handle the Solve Command
 self.onmessage = function(e) {
-    const stateString = e.data;
-
-    if (!isSolverReady) {
-        self.postMessage({ error: "Solver is still initializing... please wait." });
-        return;
-    }
-
-    try {
-        // Create a new Cube object from the string
-        const cube = Cube.fromString(stateString);
-        
-        // Solve it
-        const solution = cube.solve();
-        
-        self.postMessage({ success: true, solution: solution });
-    } catch (err) {
-        self.postMessage({ error: "Solve failed: " + err.message });
+    const data = e.data;
+    
+    if (data.type === 'solve') {
+        if (!isReady) {
+            self.postMessage({ type: 'error', message: "Solver loading... wait 3s" });
+            return;
+        }
+        try {
+            const cube = Cube.fromString(data.state);
+            const solution = cube.solve();
+            self.postMessage({ type: 'solution', moves: solution });
+        } catch (err) {
+            self.postMessage({ type: 'error', message: "Invalid colors! Check cube." });
+        }
     }
 };
