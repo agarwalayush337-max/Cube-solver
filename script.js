@@ -239,6 +239,42 @@ function createRubiksCube() {
                 cubes.push(cube);
             }
 }
+// ==========================================
+// PAINTING HELPERS (MISSING – FIX)
+// ==========================================
+function selectColor(el, c) {
+    paintColor = c;
+    document.querySelectorAll('.swatch').forEach(s =>
+        s.classList.remove('selected')
+    );
+    el.classList.add('selected');
+}
+
+function handlePaintClick(x, y) {
+    if (isAnimating) return;
+
+    mouse.x = (x / window.innerWidth) * 2 - 1;
+    mouse.y = -(y / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(cubes);
+
+    if (intersects.length === 0) return;
+
+    const hit = intersects[0];
+
+    // Centers must not be painted
+    if (hit.object.userData.isCenter) {
+        alert("⚠️ Centers are fixed! Hold Green front, White on top.");
+        return;
+    }
+
+    const matIndex = hit.face.materialIndex;
+
+    if (hit.object.material[matIndex].color.getHex() !== colors.Core) {
+        hit.object.material[matIndex].color.setHex(colors[paintColor]);
+    }
+}
 
 // ==========================================
 // 5. SOLVE LOGIC (FIXED)
