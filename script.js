@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – SPLIT ANIMATION & CSP LOGIC
+   RUBIK'S CUBE SOLVER – PERFECT "SUDOKU" LOGIC
    ========================================================= */
 
 /* =======================
@@ -12,22 +12,18 @@ const colors = {
     D: 0xffd500, // Yellow
     L: 0xff5800, // Orange
     B: 0x0051ba, // Blue
-    Core: 0x202020 // Dark Grey
+    Core: 0x202020 // Dark Grey (Internal)
 };
 
-// Standard Constraints
-const OPPOSITES = {
-    'U': 'D', 'D': 'U',
-    'R': 'L', 'L': 'R',
-    'F': 'B', 'B': 'F'
-};
-
-const STANDARD_PIECES = [
-    ['U','R','F'], ['U','F','L'], ['U','L','B'], ['U','B','R'],
-    ['D','F','R'], ['D','L','F'], ['D','B','L'], ['D','R','B'],
-    ['U','R'], ['U','F'], ['U','L'], ['U','B'],
-    ['D','R'], ['D','F'], ['D','L'], ['D','B'],
-    ['F','R'], ['F','L'], ['B','L'], ['B','R']
+// All 20 Valid Movable Pieces (Standard Scheme)
+const ALL_CORNERS = [
+    ["U","R","F"], ["U","F","L"], ["U","L","B"], ["U","B","R"],
+    ["D","F","R"], ["D","L","F"], ["D","B","L"], ["D","R","B"]
+];
+const ALL_EDGES = [
+    ["U","R"], ["U","F"], ["U","L"], ["U","B"],
+    ["D","R"], ["D","F"], ["D","L"], ["D","B"],
+    ["F","R"], ["F","L"], ["B","L"], ["B","R"]
 ];
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
@@ -74,7 +70,7 @@ solverWorker.onmessage = (e) => {
     }
     if (d.type === "solution") {
         if (!d.solution || d.solution.startsWith("Error")) {
-            statusEl.innerText = "Unsolvable! Check colors.";
+            statusEl.innerText = "Unsolvable! Check for duplicate colors.";
             statusEl.style.color = "red";
             return;
         }
@@ -173,12 +169,15 @@ function createCube() {
             }
 }
 
-function getColorName(hex) {
+/* =======================
+   HELPERS
+======================= */
+function getColorKey(hex) {
     for (const k in colors) {
         if (k === "Core") continue;
         if (colors[k] === hex) return k;
     }
-    return null;
+    return null; 
 }
 
 function snapToGrid() {
@@ -209,17 +208,20 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 }
 
 /* =======================
-   LOGICAL AUTOFILL (CSP)
+   RECURSIVE LOGICAL FILL (FORWARD + REVERSE)
 ======================= */
 function runLogicalAutofill() {
     let loopChanges = true;
     let iteration = 0;
 
-    while (loopChanges && iteration < 30) {
+    // Loop until deductions stabilize
+    while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
 
+        // 1. Snapshot: Get state of all 20 movable pieces
         let boardPieces = []; 
+
         const getExposedFaces = (c) => {
             const x = Math.round(c.position.x);
             const y = Math.round(c.position.y);
@@ -231,7 +233,7 @@ function runLogicalAutofill() {
                     const matIdx = getVisibleFaceMatIndex(c, norm);
                     if (matIdx !== -1) {
                         const mat = c.material[matIdx];
-                        const k = getColorName(mat.color.getHex());
+                        const k = getColorKey(mat.color.getHex());
                         exposed.push({ dir: faceName, mat: mat, color: k });
                     }
                 }
@@ -246,6 +248,7 @@ function runLogicalAutofill() {
             if(c.userData.isCenter) return;
             const faces = getExposedFaces(c);
             if(faces.length === 0) return;
+            
             const paintedColors = faces.map(f => f.color).filter(c => c !== null);
             boardPieces.push({
                 obj: c,
@@ -256,91 +259,155 @@ function runLogicalAutofill() {
             });
         });
 
-        let availablePieces = JSON.parse(JSON.stringify(STANDARD_PIECES));
+        // 2. Inventory: Remove pieces that are already fully painted/identified
+        let availableCorners = [...ALL_CORNERS];
+        let availableEdges = [...ALL_EDGES];
+
         boardPieces.forEach(p => {
             if (p.isComplete) {
                 const set = new Set(p.painted);
-                const idx = availablePieces.findIndex(inv => 
-                    inv.length === p.painted.length && inv.every(col => set.has(col))
-                );
-                if(idx !== -1) availablePieces.splice(idx, 1);
+                if(p.type === 'corner') {
+                    // Remove matching corner from inventory
+                    const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
+                    if(idx !== -1) availableCorners.splice(idx, 1);
+                } else {
+                    // Remove matching edge
+                    const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
+                    if(idx !== -1) availableEdges.splice(idx, 1);
+                }
             }
         });
 
+        // 3. LOGIC A: FORWARD DEDUCTION
+        // "I am Piece X. I have colors [White, Red]. Only [White, Red, Blue] is left in inventory. I must be Blue."
         boardPieces.forEach(p => {
             if (p.isComplete) return; 
             if (p.painted.length === 0) return; 
 
-            let candidates = availablePieces.filter(cand => 
-                cand.length === (p.type==='corner'?3:2) && 
-                p.painted.every(paint => cand.includes(paint))
-            );
-
-            // Filter by Opposite Colors Constraint
-            candidates = candidates.filter(cand => {
-                // If a piece has color X, it can't have color Opposite(X)
-                // (e.g., Red/Orange edge is impossible)
-                // This is inherent in STANDARD_PIECES, but let's be safe:
-                return true; 
-            });
+            let candidates = [];
+            if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
+            else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
 
             if (candidates.length === 1) {
-                const match = candidates[0];
-                const missingColors = match.filter(c => !p.painted.includes(c));
-                const emptyFaces = p.faces.filter(f => f.color === null);
-                
-                if (emptyFaces.length === 1 && missingColors.length === 1) {
-                    const f = emptyFaces[0];
-                    if (missingColors[0] !== OPPOSITES[f.dir]) {
-                        f.mat.color.setHex(colors[missingColors[0]]);
-                        f.mat.needsUpdate = true;
-                        loopChanges = true;
-                    }
-                } else if (emptyFaces.length > 1) {
-                    let solvedCount = 0;
-                    emptyFaces.forEach(f => {
-                        const allowed = missingColors.filter(col => col !== OPPOSITES[f.dir]);
-                        if (allowed.length === 1) {
-                             // Check ambiguity with other faces on same piece
-                            const others = emptyFaces.filter(ef => ef !== f);
-                            const ambiguous = others.some(ef => allowed[0] !== OPPOSITES[ef.dir]);
-                            
-                            if(!ambiguous) {
-                                f.mat.color.setHex(colors[allowed[0]]);
-                                f.mat.needsUpdate = true;
-                                solvedCount++;
-                            }
-                        }
-                    });
-                    if(solvedCount > 0) loopChanges = true;
-                }
+                if(fillPiece(p, candidates[0])) loopChanges = true;
             }
         });
+
+        // 4. LOGIC B: REVERSE DEDUCTION (INVERSE)
+        // "I am the [White, Red, Green] candidate in inventory. Only one empty slot on the board fits me. I go there."
+        if (!loopChanges) {
+            // Check remaining Corners
+            availableCorners.forEach(cand => {
+                const compatiblePieces = boardPieces.filter(p => 
+                    p.type === 'corner' && 
+                    !p.isComplete && 
+                    p.painted.every(col => cand.includes(col))
+                );
+
+                if (compatiblePieces.length === 1) {
+                    if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
+                }
+            });
+
+            // Check remaining Edges
+            availableEdges.forEach(cand => {
+                const compatiblePieces = boardPieces.filter(p => 
+                    p.type === 'edge' && 
+                    !p.isComplete && 
+                    p.painted.every(col => cand.includes(col))
+                );
+
+                if (compatiblePieces.length === 1) {
+                    if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
+                }
+            });
+        }
     }
     
     if(iteration > 1) updatePaletteCounts();
 }
 
+function fillPiece(p, candidateColors) {
+    let filledSomething = false;
+    const missing = candidateColors.filter(c => !p.painted.includes(c));
+    
+    p.faces.forEach(f => {
+        // Only fill if empty (Null) to protect manual input
+        if (f.color === null && missing.length > 0) {
+            const fill = missing.shift(); 
+            f.mat.color.setHex(colors[fill]);
+            f.mat.needsUpdate = true;
+            filledSomething = true;
+        }
+    });
+    return filledSomething;
+}
+
+
 /* =======================
-   ROTATION (WITH SPLIT ANIMATION)
+   INTERACTION
+======================= */
+function handlePaint(clientX, clientY) {
+    if (isAnimating) return;
+
+    mouse.x = (clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(cubes);
+
+    if (intersects.length > 0) {
+        const hit = intersects[0];
+        const obj = hit.object;
+        
+        if (obj.userData.isCenter) {
+             statusEl.innerText = "Centers are fixed!";
+             return;
+        }
+
+        const matIndex = hit.face.materialIndex;
+        const mat = obj.material[matIndex];
+        
+        // Manual Paint
+        mat.color.setHex(colors[paintColor]);
+        mat.needsUpdate = true;
+        
+        // Run Logic
+        runLogicalAutofill();
+        updatePaletteCounts();
+    }
+}
+
+function clearCube() {
+    if(isAnimating) return;
+    if(!confirm("Clear all colors? Centers will remain.")) return;
+
+    cubes.forEach(c => {
+        if(!c.userData.isCenter) {
+             c.material.forEach(m => {
+                 m.color.setHex(colors.Core); // Reset to Grey
+                 m.needsUpdate = true;
+             });
+        }
+    });
+    
+    solutionTextEl.innerText = "";
+    document.getElementById("action-controls").style.display = "flex";
+    document.getElementById("playback-controls").style.display = "none";
+    updatePaletteCounts();
+    statusEl.innerText = "Cube Cleared";
+}
+
+/* =======================
+   ROTATION & SOLVER
 ======================= */
 function rotateFace(move, reverse=false, onComplete=null) {
-    // 1. SPLIT DOUBLE MOVES (e.g. "U2")
-    if (move.includes("2")) {
-        const singleMove = move.replace("2", ""); // "U2" -> "U"
-        // First 90 deg
-        rotateFace(singleMove, reverse, () => {
-            // Second 90 deg
-            rotateFace(singleMove, reverse, onComplete);
-        });
-        return;
-    }
-
     if (isAnimating && !onComplete) return;
     isAnimating = true;
 
     let face = move[0];
     let prime = move.includes("'");
+    let twice = move.includes("2");
     if (reverse) prime = !prime;
     let dir = prime ? 1 : -1;
     let axis = "y"; 
@@ -361,8 +428,7 @@ function rotateFace(move, reverse=false, onComplete=null) {
     pivotGroup.add(pivot);
     group.forEach(c => pivot.attach(c));
 
-    // Target is ALWAYS 90 degrees because we split '2's
-    const targetAngle = (Math.PI/2) * dir;
+    const targetAngle = (twice ? Math.PI : Math.PI/2) * dir;
     const speed = onComplete ? SCRAMBLE_SPEED : PLAY_SPEED; 
     const start = Date.now();
 
@@ -386,50 +452,6 @@ function rotateFace(move, reverse=false, onComplete=null) {
         }
     }
     step();
-}
-
-/* =======================
-   REST OF APP
-======================= */
-function handlePaint(clientX, clientY) {
-    if (isAnimating) return;
-    mouse.x = (clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(cubes);
-
-    if (intersects.length > 0) {
-        const hit = intersects[0];
-        const obj = hit.object;
-        if (obj.userData.isCenter) {
-             statusEl.innerText = "Centers are fixed!";
-             return;
-        }
-        const matIndex = hit.face.materialIndex;
-        const mat = obj.material[matIndex];
-        mat.color.setHex(colors[paintColor]);
-        mat.needsUpdate = true;
-        runLogicalAutofill();
-        updatePaletteCounts();
-    }
-}
-
-function clearCube() {
-    if(isAnimating) return;
-    if(!confirm("Clear all colors? Centers will remain.")) return;
-    cubes.forEach(c => {
-        if(!c.userData.isCenter) {
-             c.material.forEach(m => {
-                 m.color.setHex(colors.Core);
-                 m.needsUpdate = true;
-             });
-        }
-    });
-    solutionTextEl.innerText = "";
-    document.getElementById("action-controls").style.display = "flex";
-    document.getElementById("playback-controls").style.display = "none";
-    updatePaletteCounts();
-    statusEl.innerText = "Cube Cleared";
 }
 
 function scrambleCube() {
@@ -462,22 +484,26 @@ function solveCube() {
         alert(`Invalid Colors! Each color must appear exactly 9 times.`);
         return;
     }
+
     statusEl.innerText = "Computing solution...";
     statusEl.style.color = "cyan";
     solverWorker.postMessage({ type:"solve", cube: cubeStr });
 }
 
+/* =======================
+   STATE STRING GEN
+======================= */
 function getCubeStateString() {
     let state = "";
     const find = (x,y,z) => cubes.find(c => Math.round(c.position.x)===x && Math.round(c.position.y)===y && Math.round(c.position.z)===z);
 
     const faces = [
-        { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] },
-        { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] },
-        { norm: new THREE.Vector3(0,0,1), pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] },
-        { norm: new THREE.Vector3(0,-1,0), pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] },
-        { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] },
-        { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] }
+        { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] }, // U
+        { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] }, // R
+        { norm: new THREE.Vector3(0,0,1), pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] }, // F
+        { norm: new THREE.Vector3(0,-1,0), pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] }, // D
+        { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] }, // L
+        { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] }  // B
     ];
 
     faces.forEach(f => {
@@ -486,7 +512,7 @@ function getCubeStateString() {
             if(cube) {
                 const matIdx = getVisibleFaceMatIndex(cube, f.norm);
                 const hex = cube.material[matIdx].color.getHex();
-                const char = getColorName(hex);
+                const char = getColorKey(hex);
                 state += char ? char : "?";
             } else {
                 state += "?";
@@ -502,6 +528,9 @@ function countColors(state) {
     return c;
 }
 
+/* =======================
+   UI UPDATES
+======================= */
 function updatePaletteCounts() {
     if(isAnimating) return;
     const state = getCubeStateString();
@@ -522,6 +551,9 @@ function selectColor(el, c) {
     updatePaletteCounts();
 }
 
+/* =======================
+   CONTROLS
+======================= */
 function updateStepStatus() {
     statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length}`;
 }
@@ -548,6 +580,7 @@ function togglePlay() {
         if(btn) btn.innerText = "PLAY";
     } else {
         if(!solutionMoves.length) return;
+        if(moveIndex >= solutionMoves.length) moveIndex = 0;
         if(btn) btn.innerText = "PAUSE";
         playInterval = setInterval(() => {
             if(!isAnimating){
@@ -567,6 +600,9 @@ function resetCube() {
     location.reload();
 }
 
+/* =======================
+   INPUT
+======================= */
 function onInputStart(e) {
     isMouseDown = true;
     isDragging = false;
