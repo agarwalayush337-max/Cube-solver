@@ -216,29 +216,32 @@ function createCube() {
    STATE UPDATER (FIX #1)
 ======================= */
 // After any rotation, we must update userData.ix/iy/iz based on new world positions
+/* =======================
+   STATE UPDATER (FIXED)
+======================= */
 function updateCubeIndices() {
     cubes.forEach(c => {
-        // Get world position relative to the pivot group container
-        // Since we only rotate the group or pivots inside it, 
-        // we can trust the object's local position if it's direct child of pivotGroup
-        // BUT, rotateFace re-attaches them.
+        // 1. Get the world position
+        const worldPos = new THREE.Vector3();
+        c.getWorldPosition(worldPos);
+
+        // 2. Snap to nearest integer (-1, 0, 1)
+        c.userData.ix = Math.round(worldPos.x);
+        c.userData.iy = Math.round(worldPos.y);
+        c.userData.iz = Math.round(worldPos.z);
+
+        // 3. Reset local position to perfectly match the logical index
+        // This prevents floating point drift (e.g. 0.99999 -> 1.0)
+        c.position.set(c.userData.ix, c.userData.iy, c.userData.iz);
         
-        const vec = new THREE.Vector3();
-        c.getWorldPosition(vec);
+        // 4. Reset rotation to nearest 90 degrees to keep it clean
+        c.rotation.x = Math.round(c.rotation.x / (Math.PI/2)) * (Math.PI/2);
+        c.rotation.y = Math.round(c.rotation.y / (Math.PI/2)) * (Math.PI/2);
+        c.rotation.z = Math.round(c.rotation.z / (Math.PI/2)) * (Math.PI/2);
         
-        // We need the position relative to the pivotGroup's rotation, 
-        // effectively "un-rotating" the group to find the logical grid.
-        // HOWEVER, simpler approach: The cube geometry aligns with axes. 
-        
-        // Actually, in the current rotateFace logic, we physically rotate the cube meshes.
-        // So their position.x/y/z changes.
-        
-        c.userData.ix = Math.round(c.position.x);
-        c.userData.iy = Math.round(c.position.y);
-        c.userData.iz = Math.round(c.position.z);
+        c.updateMatrix();
     });
 }
-
 /* =======================
    PALETTE & PAINT
 ======================= */
@@ -603,8 +606,11 @@ function scrambleCube() {
 /* =======================
    ROTATION ENGINE
 ======================= */
+/* =======================
+   ROTATION ENGINE (FIXED)
+======================= */
 function rotateFace(move, reverse=false) {
-    if (isAnimating && !move) return; // Allow programmatic calls
+    if (isAnimating && !move) return; 
     isAnimating = true;
 
     let face = move[0];
@@ -612,51 +618,81 @@ function rotateFace(move, reverse=false) {
     let twice = move.includes("2");
     if (reverse) prime = !prime;
 
-    // Direction multiplier
     let dir = prime ? 1 : -1;
-    let axis = "y";
+    let axis = new THREE.Vector3();
     let group = [];
 
-    // Select cubes based on logical indices
+    // Identify axis and selection criteria
+    if (face === "U") axis.set(0, 1, 0);
+    if (face === "D") { axis.set(0, 1, 0); dir *= -1; }
+    if (face === "L") { axis.set(1, 0, 0); dir *= -1; }
+    if (face === "R") axis.set(1, 0, 0);
+    if (face === "F") axis.set(0, 0, 1);
+    if (face === "B") { axis.set(0, 0, 1); dir *= -1; }
+
+    // Select cubes based on logical indices (ix, iy, iz)
     cubes.forEach(c => {
         const { ix, iy, iz } = c.userData;
-        
-        if(face==="R" && ix === 1) { axis="x"; group.push(c); }
-        if(face==="L" && ix === -1){ axis="x"; dir *= -1; group.push(c); }
-        
-        if(face==="U" && iy === 1) { axis="y"; group.push(c); }
-        if(face==="D" && iy === -1){ axis="y"; dir *= -1; group.push(c); }
-        
-        if(face==="F" && iz === 1) { axis="z"; group.push(c); }
-        if(face==="B" && iz === -1){ axis="z"; dir *= -1; group.push(c); }
+        if (face === "U" && iy === 1) group.push(c);
+        if (face === "D" && iy === -1) group.push(c);
+        if (face === "L" && ix === -1) group.push(c);
+        if (face === "R" && ix === 1) group.push(c);
+        if (face === "F" && iz === 1) group.push(c);
+        if (face === "B" && iz === -1) group.push(c);
     });
 
+    // Create a temporary pivot at (0,0,0)
     const pivot = new THREE.Object3D();
+    pivot.rotation.set(0, 0, 0);
     pivotGroup.add(pivot);
-    group.forEach(c => pivot.attach(c));
 
-    const angle = (twice ? Math.PI : Math.PI/2) * dir;
-    const duration = PLAY_SPEED === 1000 ? 500 : 120; // Faster for scramble
+    // Attach cubes to pivot
+    group.forEach(c => {
+        pivotGroup.remove(c);
+        pivot.add(c);
+    });
+
+    const targetAngle = (twice ? Math.PI : Math.PI/2) * dir;
+    const duration = PLAY_SPEED === 1000 ? 500 : 120; // Fast for scramble
     const start = Date.now();
 
-    function step(){
+    function step() {
         const now = Date.now();
-        const p = Math.min((now - start) / duration, 1);
-        
-        // Easing
-        const ease = p * (2 - p); 
-        pivot.rotation[axis] = angle * ease;
+        let p = (now - start) / duration;
+        if (p > 1) p = 1;
 
-        if(p < 1) {
+        // Smooth easing
+        const ease = p * (2 - p);
+        
+        // Rotate on the specific axis
+        pivot.rotation.set(
+            axis.x * targetAngle * ease,
+            axis.y * targetAngle * ease,
+            axis.z * targetAngle * ease
+        );
+
+        if (p < 1) {
             requestAnimationFrame(step);
         } else {
-            pivot.rotation[axis] = angle; // Ensure exact end
-            group.forEach(c => pivotGroup.attach(c));
+            // FINISH: Re-attach to main group
+            pivot.updateMatrixWorld(); // Ensure pivot transform is final
+            
+            // We must carefully detach to preserve world transforms
+            // But since our pivot is at 0,0,0 inside pivotGroup, it's safer to:
+            // 1. Update the cubies' world matrices
+            // 2. Attach back to pivotGroup
+            
+            for (let i = group.length - 1; i >= 0; i--) {
+                const c = group[i];
+                // Three.js 'attach' handles the coordinate conversion automatically
+                pivotGroup.attach(c); 
+            }
+            
             pivotGroup.remove(pivot);
-            
-            // CRITICAL FIX: Update logical indices
+
+            // KEY FIX: Snap positions to grid so next move works
             updateCubeIndices();
-            
+
             isAnimating = false;
         }
     }
