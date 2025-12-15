@@ -2,35 +2,44 @@ importScripts('./solver.js');
 
 let engineReady = false;
 
-try {
-  if (typeof min2phase === 'undefined') {
-    throw new Error('min2phase not found');
+// STEP 1: incremental init loop
+function initEngine() {
+  // initFull() does NOT finish in one call
+  const done = min2phase.initFull();
+
+  if (done === true) {
+    engineReady = true;
+    postMessage({ type: 'ready' });
+  } else {
+    // keep initializing without blocking
+    postMessage({ type: 'status', message: 'Loading engine…' });
+    setTimeout(initEngine, 0);
   }
-
-  // REAL Min2Phase initialization
-  min2phase.initFull();
-
-  engineReady = true;
-  postMessage({ type: 'ready' });
-
-} catch (e) {
-  postMessage({
-    type: 'error',
-    message: e.message
-  });
 }
 
+// STEP 2: start initialization
+try {
+  if (typeof min2phase === 'undefined') {
+    throw new Error('min2phase not loaded');
+  }
+  initEngine();
+} catch (e) {
+  postMessage({ type: 'error', message: e.message });
+}
+
+// STEP 3: handle solve requests
 onmessage = function (e) {
   if (!engineReady) {
     postMessage({ type: 'status', message: 'Engine loading…' });
     return;
   }
 
-  const cube = e.data.cube;
-  try {
-    const solution = min2phase.solve(cube);
-    postMessage({ type: 'solution', solution });
-  } catch (err) {
-    postMessage({ type: 'error', message: err.toString() });
+  if (e.data.type === 'solve') {
+    try {
+      const solution = min2phase.solve(e.data.cube);
+      postMessage({ type: 'solution', solution });
+    } catch (err) {
+      postMessage({ type: 'error', message: err.toString() });
+    }
   }
 };
