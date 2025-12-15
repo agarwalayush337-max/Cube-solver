@@ -3,16 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <title>Rubik's Cube Solver</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Three.js -->
   <script src="three.min.js"></script>
 </head>
 <body>
 
-  <!-- TOP CONTROLS -->
   <div id="top-panel">
     <div id="palette">
       <div class="swatch white selected" data-color="U" onclick="selectColor(this,'U')">
@@ -34,38 +32,32 @@
         <span class="count">0</span>
       </div>
     </div>
+    
+    <div id="tool-row">
+        <button onclick="clearCube()" class="tool-btn">CLEAR COLORS</button>
+        <button onclick="resetCube()" class="tool-btn">RESET APP</button>
+    </div>
 
-    <div id="instruction">Select color & tap faces to paint</div>
+    <div id="instruction">Select color & tap faces to paint (or Scramble)</div>
   </div>
 
-  <!-- CANVAS -->
   <div id="canvas-container"></div>
 
-  <!-- STATUS -->
   <div id="status">Loading engine…</div>
   <div id="solutionText"></div>
 
-  <!-- ACTION CONTROLS -->
   <div id="action-controls">
     <button onclick="scrambleCube()">SCRAMBLE</button>
     <button onclick="solveCube()" class="primary">SOLVE CUBE</button>
   </div>
 
-  <!-- PLAYBACK CONTROLS -->
   <div id="playback-controls">
     <button onclick="prevMove()">◀</button>
     <button id="playPauseBtn" onclick="togglePlay()">PLAY</button>
     <button onclick="nextMove()">▶</button>
   </div>
 
-  <!-- RESET -->
-  <div id="reset-container">
-    <button id="resetBtn" onclick="resetCube()">RESET</button>
-  </div>
-
-  <!-- SCRIPT -->
   <script src="script.js"></script>
 
 </body>
 </html>
-
