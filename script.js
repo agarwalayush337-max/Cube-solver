@@ -124,6 +124,88 @@ function init() {
     createRubiksCube();
     pivotGroup.rotation.set(0.3, -0.4, 0);
 }
+// ==========================================
+// INPUT HANDLERS (MISSING – FIX)
+// ==========================================
+function onMouseDown(e) {
+    isMouseDown = true;
+    isDragging = false;
+    previousMousePosition = { x: e.clientX, y: e.clientY };
+}
+
+function onMouseMove(e) {
+    if (!isMouseDown) return;
+
+    const delta = {
+        x: e.clientX - previousMousePosition.x,
+        y: e.clientY - previousMousePosition.y
+    };
+
+    if (Math.abs(delta.x) > 2 || Math.abs(delta.y) > 2) {
+        isDragging = true;
+    }
+
+    if (isDragging) {
+        pivotGroup.rotation.y += delta.x * 0.005;
+        pivotGroup.rotation.x += delta.y * 0.005;
+    }
+
+    previousMousePosition = { x: e.clientX, y: e.clientY };
+}
+
+function onMouseUp(e) {
+    isMouseDown = false;
+
+    if (!isDragging) {
+        handlePaintClick(e.clientX, e.clientY);
+    }
+    isDragging = false;
+}
+
+function onTouchStart(e) {
+    isMouseDown = true;
+    isDragging = false;
+    previousMousePosition = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY
+    };
+}
+
+function onTouchMove(e) {
+    if (!isMouseDown) return;
+
+    const delta = {
+        x: e.touches[0].clientX - previousMousePosition.x,
+        y: e.touches[0].clientY - previousMousePosition.y
+    };
+
+    if (Math.abs(delta.x) > 2 || Math.abs(delta.y) > 2) {
+        isDragging = true;
+    }
+
+    if (isDragging) {
+        e.preventDefault();
+        pivotGroup.rotation.y += delta.x * 0.005;
+        pivotGroup.rotation.x += delta.y * 0.005;
+    }
+
+    previousMousePosition = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY
+    };
+}
+
+function onTouchEnd(e) {
+    isMouseDown = false;
+
+    if (!isDragging && e.changedTouches.length > 0) {
+        handlePaintClick(
+            e.changedTouches[0].clientX,
+            e.changedTouches[0].clientY
+        );
+    }
+}
+
 
 // ==========================================
 // 4. CUBE CREATION
