@@ -1,9 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – COMPLETE script.js
-   Compatible with:
-   - existing HTML
-   - worker.js (min2phase)
-   - Three.js
+   RUBIK'S CUBE SOLVER – FULL & STABLE script.js
    ========================================================= */
 
 /* =======================
@@ -20,7 +16,7 @@ const colors = {
 };
 
 function getColorChar(hex) {
-    let min = Infinity, res = null;
+    let best = null, min = Infinity;
     for (const k in colors) {
         if (k === "Core") continue;
         const v = colors[k];
@@ -30,10 +26,10 @@ function getColorChar(hex) {
             Math.abs((hex & 255) - (v & 255));
         if (d < min) {
             min = d;
-            res = k;
+            best = k;
         }
     }
-    return res;
+    return best;
 }
 
 /* =======================
@@ -76,7 +72,7 @@ solverWorker.onmessage = (e) => {
 
     if (d.type === "solution") {
         if (!d.solution || !d.solution.trim()) {
-            statusEl.innerText = "Already solved or invalid cube";
+            statusEl.innerText = "Invalid or already solved cube";
             statusEl.style.color = "red";
             return;
         }
@@ -84,11 +80,10 @@ solverWorker.onmessage = (e) => {
         solutionMoves = d.solution.trim().split(/\s+/);
         moveIndex = 0;
 
-        statusEl.innerHTML = `Solved (${solutionMoves.length} moves)`;
-        statusEl.style.color = "#00ff00";
-
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
+
+        updateStepStatus();
     }
 
     if (d.type === "error") {
@@ -139,7 +134,26 @@ function init() {
 }
 
 /* =======================
-   5. CUBE CREATION
+   5. NUMBER TEXTURE
+======================= */
+function createNumberTexture(num) {
+    const size = 128;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d");
+
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.font = "bold 72px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(num, size / 2, size / 2);
+
+    return new THREE.CanvasTexture(canvas);
+}
+
+/* =======================
+   6. CUBE CREATION
 ======================= */
 function createCube() {
     const geo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
@@ -171,12 +185,18 @@ function createCube() {
 }
 
 /* =======================
-   6. PAINTING
+   7. PAINTING
 ======================= */
 function selectColor(el, c) {
     paintColor = c;
     document.querySelectorAll(".swatch").forEach(s => s.classList.remove("selected"));
     el.classList.add("selected");
+}
+
+function countColors(state) {
+    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
+    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
+    return c;
 }
 
 function handlePaintClick(x, y) {
@@ -195,10 +215,15 @@ function handlePaintClick(x, y) {
     }
 
     hit.object.material[hit.face.materialIndex].color.setHex(colors[paintColor]);
+
+    const counts = countColors(getCubeStateString());
+    const tex = createNumberTexture(counts[paintColor]);
+    hit.object.material[hit.face.materialIndex].map = tex;
+    hit.object.material[hit.face.materialIndex].needsUpdate = true;
 }
 
 /* =======================
-   7. INPUT HANDLERS
+   8. INPUT HANDLERS
 ======================= */
 function onMouseDown(e) {
     isMouseDown = true;
@@ -229,7 +254,7 @@ function onMouseUp(e) {
 }
 
 /* =======================
-   8. CUBE STATE CAPTURE
+   9. CUBE STATE CAPTURE
 ======================= */
 function getCubeStateString() {
     let state = "";
@@ -238,12 +263,12 @@ function getCubeStateString() {
         cubes.find(c => c.userData.ix === x && c.userData.iy === y && c.userData.iz === z);
 
     const faces = [
-        [[-1,1,-1],[0,1,-1],[1,1,-1],[-1,1,0],[0,1,0],[1,1,0],[-1,1,1],[0,1,1],[1,1,1]], // U
-        [[1,1,1],[1,1,0],[1,1,-1],[1,0,1],[1,0,0],[1,0,-1],[1,-1,1],[1,-1,0],[1,-1,-1]], // R
-        [[-1,1,1],[0,1,1],[1,1,1],[-1,0,1],[0,0,1],[1,0,1],[-1,-1,1],[0,-1,1],[1,-1,1]], // F
-        [[-1,-1,1],[0,-1,1],[1,-1,1],[-1,-1,0],[0,-1,0],[1,-1,0],[-1,-1,-1],[0,-1,-1],[1,-1,-1]], // D
-        [[-1,1,-1],[-1,1,0],[-1,1,1],[-1,0,-1],[-1,0,0],[-1,0,1],[-1,-1,-1],[-1,-1,0],[-1,-1,1]], // L
-        [[1,1,-1],[0,1,-1],[-1,1,-1],[1,0,-1],[0,0,-1],[-1,0,-1],[1,-1,-1],[0,-1,-1],[-1,-1,-1]]  // B
+        [[-1,1,-1],[0,1,-1],[1,1,-1],[-1,1,0],[0,1,0],[1,1,0],[-1,1,1],[0,1,1],[1,1,1]],
+        [[1,1,1],[1,1,0],[1,1,-1],[1,0,1],[1,0,0],[1,0,-1],[1,-1,1],[1,-1,0],[1,-1,-1]],
+        [[-1,1,1],[0,1,1],[1,1,1],[-1,0,1],[0,0,1],[1,0,1],[-1,-1,1],[0,-1,1],[1,-1,1]],
+        [[-1,-1,1],[0,-1,1],[1,-1,1],[-1,-1,0],[0,-1,0],[1,-1,0],[-1,-1,-1],[0,-1,-1],[1,-1,-1]],
+        [[-1,1,-1],[-1,1,0],[-1,1,1],[-1,0,-1],[-1,0,0],[-1,0,1],[-1,-1,-1],[-1,-1,0],[-1,-1,1]],
+        [[1,1,-1],[0,1,-1],[-1,1,-1],[1,0,-1],[0,0,-1],[-1,0,-1],[1,-1,-1],[0,-1,-1],[-1,-1,-1]]
     ];
 
     const mats = [2,0,4,3,1,5];
@@ -259,16 +284,22 @@ function getCubeStateString() {
 }
 
 /* =======================
-   9. SOLVE
+   10. SOLVE (WITH VALIDATION)
 ======================= */
 function solveCube() {
-    if (!engineReady) {
-        alert("Engine still loading");
-        return;
-    }
+    if (!engineReady) return alert("Engine still loading");
 
     const cube = getCubeStateString();
-    console.log("Captured cube:", cube);
+    const counts = countColors(cube);
+
+    const errors = Object.entries(counts)
+        .filter(([k,v]) => v !== 9)
+        .map(([k,v]) => `${k}: ${v}/9`);
+
+    if (errors.length) {
+        alert("❌ Invalid cube\n\n" + errors.join("\n"));
+        return;
+    }
 
     statusEl.innerText = "Analyzing…";
     statusEl.style.color = "orange";
@@ -277,9 +308,9 @@ function solveCube() {
 }
 
 /* =======================
-   10. ROTATION ENGINE
+   11. ROTATION ENGINE
 ======================= */
-function rotateFace(move, reverse = false) {
+function rotateFace(move, reverse=false) {
     if (isAnimating) return;
     isAnimating = true;
 
@@ -293,57 +324,75 @@ function rotateFace(move, reverse = false) {
     let group = [];
 
     cubes.forEach(c => {
-        if (face === "R" && c.position.x > 0.5) axis="x", group.push(c);
-        if (face === "L" && c.position.x < -0.5) axis="x", dir*=-1, group.push(c);
-        if (face === "U" && c.position.y > 0.5) axis="y", group.push(c);
-        if (face === "D" && c.position.y < -0.5) axis="y", dir*=-1, group.push(c);
-        if (face === "F" && c.position.z > 0.5) axis="z", group.push(c);
-        if (face === "B" && c.position.z < -0.5) axis="z", dir*=-1, group.push(c);
+        if (face==="R" && c.position.x>0.5) axis="x",group.push(c);
+        if (face==="L" && c.position.x<-0.5) axis="x",dir*=-1,group.push(c);
+        if (face==="U" && c.position.y>0.5) axis="y",group.push(c);
+        if (face==="D" && c.position.y<-0.5) axis="y",dir*=-1,group.push(c);
+        if (face==="F" && c.position.z>0.5) axis="z",group.push(c);
+        if (face==="B" && c.position.z<-0.5) axis="z",dir*=-1,group.push(c);
     });
 
     const pivot = new THREE.Object3D();
     pivotGroup.add(pivot);
     group.forEach(c => pivot.attach(c));
 
-    const angle = (twice ? Math.PI : Math.PI / 2) * dir;
+    const angle = (twice ? Math.PI : Math.PI/2) * dir;
     const start = Date.now();
 
     function step() {
-        const p = Math.min((Date.now() - start) / 250, 1);
-        pivot.rotation[axis] = angle * p;
-
-        if (p < 1) requestAnimationFrame(step);
+        const p = Math.min((Date.now() - start)/250,1);
+        pivot.rotation[axis] = angle*p;
+        if (p<1) requestAnimationFrame(step);
         else {
-            group.forEach(c => pivotGroup.attach(c));
+            group.forEach(c=>pivotGroup.attach(c));
             pivotGroup.remove(pivot);
-            isAnimating = false;
+            isAnimating=false;
         }
     }
     step();
 }
 
 /* =======================
-   11. PLAYBACK CONTROLS
+   12. PLAYBACK CONTROLS
 ======================= */
+function updateStepStatus() {
+    statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length}`;
+}
+
 function nextMove() {
-    if (moveIndex >= solutionMoves.length) return;
+    if (isAnimating || moveIndex >= solutionMoves.length) return;
     rotateFace(solutionMoves[moveIndex]);
     moveIndex++;
+    updateStepStatus();
 }
 
 function prevMove() {
-    if (moveIndex <= 0) return;
+    if (isAnimating || moveIndex <= 0) return;
     moveIndex--;
     rotateFace(solutionMoves[moveIndex], true);
+    updateStepStatus();
 }
 
 function togglePlay() {
+    const btn = document.getElementById("playPauseBtn");
+
     if (playInterval) {
         clearInterval(playInterval);
         playInterval = null;
+        if (btn) btn.innerText = "PLAY";
     } else {
+        if (!solutionMoves.length) return;
+        if (btn) btn.innerText = "PAUSE";
+
         playInterval = setInterval(() => {
-            if (!isAnimating) nextMove();
+            if (!isAnimating) {
+                if (moveIndex < solutionMoves.length) nextMove();
+                else {
+                    clearInterval(playInterval);
+                    playInterval = null;
+                    if (btn) btn.innerText = "PLAY";
+                }
+            }
         }, 600);
     }
 }
@@ -353,9 +402,10 @@ function resetCube() {
 }
 
 /* =======================
-   12. RENDER LOOP
+   13. RENDER LOOP
 ======================= */
 function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
 }
+
