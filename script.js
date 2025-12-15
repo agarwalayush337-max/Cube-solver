@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – FINAL STABLE script.js
+   RUBIK'S CUBE SOLVER – FULL FEATURED script.js
    ========================================================= */
 
 /* =======================
@@ -15,6 +15,30 @@ const colors = {
     Core: 0x151515
 };
 
+const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
+const PLAY_SPEED = 300; // ms (reduced speed)
+
+/* =======================
+   GLOBAL STATE
+======================= */
+let scene, camera, renderer;
+let raycaster, mouse;
+let cubes = [], pivotGroup;
+
+let isAnimating = false;
+let paintColor = "U";
+
+let solutionMoves = [];
+let moveIndex = 0;
+let playInterval = null;
+
+let isMouseDown = false;
+let isDragging = false;
+let lastMouse = { x: 0, y: 0 };
+
+/* =======================
+   COLOR HELPERS
+======================= */
 function getColorChar(hex) {
     let best = null, min = Infinity;
     for (const k in colors) {
@@ -32,29 +56,18 @@ function getColorChar(hex) {
     return best;
 }
 
-/* =======================
-   GLOBAL STATE
-======================= */
-let scene, camera, renderer;
-let raycaster, mouse;
-let cubes = [];
-let pivotGroup;
-
-let isAnimating = false;
-let paintColor = "U";
-
-let solutionMoves = [];
-let moveIndex = 0;
-let playInterval = null;
-
-let isMouseDown = false;
-let isDragging = false;
-let lastMouse = { x: 0, y: 0 };
+function countColors(state) {
+    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
+    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
+    return c;
+}
 
 /* =======================
    WORKER
 ======================= */
 const statusEl = document.getElementById("status");
+const solutionTextEl = document.getElementById("solutionText");
+
 statusEl.innerText = "Loading engine…";
 statusEl.style.color = "orange";
 
@@ -71,11 +84,20 @@ solverWorker.onmessage = (e) => {
     }
 
     if (d.type === "solution") {
+        if (!d.solution || !d.solution.trim()) {
+            statusEl.innerText = "Invalid or already solved cube";
+            statusEl.style.color = "red";
+            return;
+        }
+
         solutionMoves = d.solution.trim().split(/\s+/);
         moveIndex = 0;
 
+        solutionTextEl.innerText = "Solution: " + d.solution;
+
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
+        document.getElementById("resetBtn").style.display = "inline-block";
 
         updateStepStatus();
     }
@@ -118,10 +140,12 @@ function init() {
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
+
+    updatePaletteCounts();
 }
 
 /* =======================
-   NUMBER TEXTURE (FIXED)
+   NUMBER TEXTURE (SAFE)
 ======================= */
 function createNumberTexture(num) {
     const size = 128;
@@ -163,9 +187,7 @@ function createCube() {
                 const cube = new THREE.Mesh(geo, mats);
                 cube.position.set(x, y, z);
                 cube.userData = {
-                    ix: x,
-                    iy: y,
-                    iz: z,
+                    ix: x, iy: y, iz: z,
                     isCenter: Math.abs(x) + Math.abs(y) + Math.abs(z) === 1
                 };
 
@@ -175,16 +197,19 @@ function createCube() {
 }
 
 /* =======================
-   COLOR COUNT
+   PALETTE COUNTS (INSIDE COLOR BOX)
 ======================= */
-function countColors(state) {
-    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
-    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
-    return c;
+function updatePaletteCounts() {
+    const counts = countColors(getCubeStateString());
+    document.querySelectorAll(".swatch").forEach(s => {
+        const color = s.dataset.color;
+        const span = s.querySelector(".count");
+        if (span) span.innerText = counts[color];
+    });
 }
 
 /* =======================
-   PAINTING (BUG-FREE)
+   PAINTING + SMART ASSIST
 ======================= */
 function selectColor(el, c) {
     paintColor = c;
@@ -214,6 +239,24 @@ function handlePaintClick(x, y) {
     mat.emissive = new THREE.Color(0xffffff);
     mat.emissiveMap = createNumberTexture(counts[paintColor]);
     mat.needsUpdate = true;
+
+    smartAutoFill();
+    updatePaletteCounts();
+}
+
+function smartAutoFill() {
+    const counts = countColors(getCubeStateString());
+    const missing = Object.entries(counts).filter(([_,v]) => v < 9).map(([k]) => k);
+
+    if (missing.length !== 1) return;
+
+    cubes.forEach(c => {
+        c.material.forEach(m => {
+            if (m.color.getHex() === colors.Core) {
+                m.color.setHex(colors[missing[0]]);
+            }
+        });
+    });
 }
 
 /* =======================
@@ -227,7 +270,6 @@ function onMouseDown(e) {
 
 function onMouseMove(e) {
     if (!isMouseDown) return;
-
     const dx = e.clientX - lastMouse.x;
     const dy = e.clientY - lastMouse.y;
 
@@ -237,7 +279,6 @@ function onMouseMove(e) {
         pivotGroup.rotation.y += dx * 0.005;
         pivotGroup.rotation.x += dy * 0.005;
     }
-
     lastMouse = { x: e.clientX, y: e.clientY };
 }
 
@@ -277,7 +318,7 @@ function getCubeStateString() {
 }
 
 /* =======================
-   SOLVE (VALIDATED)
+   SOLVE + SCRAMBLE
 ======================= */
 function solveCube() {
     if (!engineReady) return alert("Engine loading");
@@ -285,19 +326,31 @@ function solveCube() {
     const cube = getCubeStateString();
     const counts = countColors(cube);
 
-    const errors = Object.entries(counts)
-        .filter(([k,v])=>v!==9)
-        .map(([k,v])=>`${k}: ${v}/9`);
-
-    if (errors.length) {
-        alert("Invalid cube:\n" + errors.join("\n"));
+    const invalid = Object.entries(counts).filter(([_,v])=>v!==9);
+    if (invalid.length) {
+        alert("Each color must appear exactly 9 times");
         return;
     }
 
     statusEl.innerText = "Analyzing…";
     statusEl.style.color = "orange";
-
     solverWorker.postMessage({ type:"solve", cube });
+}
+
+function scrambleCube() {
+    if (isAnimating) return;
+
+    let i = 0;
+    const scramble = Array.from({length: 20},
+        () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]
+    );
+
+    function apply() {
+        if (i >= scramble.length) return;
+        rotateFace(scramble[i++]);
+        setTimeout(apply, 120);
+    }
+    apply();
 }
 
 /* =======================
@@ -384,7 +437,7 @@ function togglePlay() {
                     if(btn)btn.innerText="PLAY";
                 }
             }
-        },600);
+        },PLAY_SPEED);
     }
 }
 
@@ -393,7 +446,7 @@ function resetCube() {
 }
 
 /* =======================
-   RENDER
+   RENDER LOOP
 ======================= */
 function animate() {
     requestAnimationFrame(animate);
