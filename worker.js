@@ -1,5 +1,6 @@
 // worker.js
-importScripts('solver.js'); 
+importScripts('./solver.js');
+ 
 
 let isReady = false;
 
