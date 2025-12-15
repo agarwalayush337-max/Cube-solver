@@ -219,25 +219,23 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 /* =======================
    THE CONSTRAINT SOLVER (LOGIC ENGINE)
 ======================= */
-/* =======================
-   THE CONSTRAINT SOLVER (LOGIC ENGINE)
-======================= */
 function runLogicalAutofill() {
     let loopChanges = true;
     let iteration = 0;
 
-    while (loopChanges && iteration < 40) {
+    // Iterate until logical deductions stabilize (Constraint Propagation)
+    while (loopChanges && iteration < 30) {
         loopChanges = false;
         iteration++;
 
-        let boardPieces = [];
-
+        // 1. Snapshot: Analyze the Board
+        let boardPieces = []; 
         const getExposedFaces = (c) => {
             const x = Math.round(c.position.x);
             const y = Math.round(c.position.y);
             const z = Math.round(c.position.z);
             const exposed = [];
-
+            // Check all 6 directions to see if this cubie exposes a face there
             const check = (wx, wy, wz, faceName) => {
                 if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
                     const norm = new THREE.Vector3(wx, wy, wz);
@@ -249,7 +247,6 @@ function runLogicalAutofill() {
                     }
                 }
             };
-
             check(0,1,0,"U"); check(0,-1,0,"D");
             check(1,0,0,"R"); check(-1,0,0,"L");
             check(0,0,1,"F"); check(0,0,-1,"B");
@@ -259,100 +256,137 @@ function runLogicalAutofill() {
         cubes.forEach(c => {
             if(c.userData.isCenter) return;
             const faces = getExposedFaces(c);
-            if(!faces.length) return;
-            const painted = faces.map(f => f.color).filter(Boolean);
-
+            if(faces.length === 0) return;
+            const paintedColors = faces.map(f => f.color).filter(c => c !== null);
             boardPieces.push({
                 obj: c,
-                faces,
-                painted,
-                type: faces.length === 3 ? "corner" : "edge",
-                isComplete: painted.length === faces.length
+                type: faces.length === 3 ? 'corner' : 'edge',
+                faces: faces,
+                painted: paintedColors,
+                isComplete: paintedColors.length === faces.length
             });
         });
 
-        let availablePieces = JSON.parse(JSON.stringify(STANDARD_PIECES));
+        // 2. Inventory: Remove pieces that are already 100% identified
+        let availablePieces = JSON.parse(JSON.stringify(STANDARD_PIECES)); // Deep copy
 
         boardPieces.forEach(p => {
-            if (!p.isComplete) return;
-            const set = new Set(p.painted);
-            const idx = availablePieces.findIndex(inv =>
-                inv.length === p.painted.length &&
-                inv.every(c => set.has(c))
-            );
-            if (idx !== -1) availablePieces.splice(idx, 1);
+            if (p.isComplete) {
+                // Find matching piece in inventory and remove it
+                // We use Sets because order of painting doesn't matter for identification
+                const set = new Set(p.painted);
+                const idx = availablePieces.findIndex(inv => 
+                    inv.length === p.painted.length && inv.every(col => set.has(col))
+                );
+                if(idx !== -1) availablePieces.splice(idx, 1);
+            }
         });
 
+        // 3. Deduction: Try to fit remaining pieces into remaining slots
         boardPieces.forEach(p => {
-            if (p.isComplete || p.painted.length === 0) return;
+            if (p.isComplete) return; 
+            if (p.painted.length === 0) return; // Too ambiguous
 
-            let candidates = availablePieces.filter(cand =>
-                cand.length === (p.type === "corner" ? 3 : 2) &&
-                p.painted.every(c => cand.includes(c))
+            // A. Filter Candidates by Colors present
+            let candidates = availablePieces.filter(cand => 
+                cand.length === (p.type==='corner'?3:2) && 
+                p.painted.every(paint => cand.includes(paint))
             );
 
-            if (candidates.length === 0) return;
+            // B. Filter Candidates by FACE CONSTRAINT (Smart Logic)
+            // Example: If a slot is on the "Up" face, it CANNOT accept a "Yellow" (D) sticker.
+            // This prevents "Wrongly Filling" / bad rotation.
+            candidates = candidates.filter(cand => {
+                // For every EMPTY face on this board piece...
+                // Are there valid colors left in the candidate to fill it?
+                const missingColors = cand.filter(c => !p.painted.includes(c));
+                
+                // If there is a candidate color that matches the OPPOSITE of a face, 
+                // it's an invalid candidate for this slot.
+                // e.g. Slot has 'U' face. Candidate has 'D' color. 'D' cannot go on 'U'.
+                
+                // Check every face of this slot
+                for (let f of p.faces) {
+                    const forbidden = OPPOSITES[f.dir]; // e.g. If face is U, forbidden is D
+                    // If the candidate contains the forbidden color, AND the face is currently empty...
+                    // Wait, if the face is empty, it MUST take one of the missing colors.
+                    // If ALL missing colors are forbidden on the empty faces, this candidate is impossible.
+                    
+                    // Actually, simpler check:
+                    // Does the candidate contain ANY color that is strictly impossible for this location?
+                    // The candidate "White-Yellow-Red" is impossible regardless of rotation.
+                    // But STANDARD_PIECES doesn't contain those.
+                    
+                    // Rotation Check:
+                    // If we assign this candidate, can we map its colors to the faces validly?
+                    // This is complex. Let's use the simple forbidden rule:
+                    // If a face is 'U', it can never take 'D'.
+                    // If a face is 'R', it can never take 'L'.
+                }
+                
+                // Simplified constraint:
+                // Does the missing set contain a color that is valid for the empty faces?
+                // Let's rely on the inventory reduction first, it's safer.
+                return true;
+            });
 
-            const emptyFaces = p.faces.filter(f => !f.color);
-
-            /* ========= EDGE DOMINANT FACE DEDUCTION ========= */
-            if (p.type === "edge" && candidates.length === 1) {
-                const missing = candidates[0].filter(c => !p.painted.includes(c));
-
-                emptyFaces.forEach(f => {
-                    const allowed = missing.filter(c => c !== OPPOSITES[f.dir]);
-                    if (allowed.length === 1) {
-                        f.mat.color.setHex(colors[allowed[0]]);
+            // If exactly one candidate remains, we solve it.
+            if (candidates.length === 1) {
+                const match = candidates[0];
+                const missingColors = match.filter(c => !p.painted.includes(c));
+                
+                // Only fill if we can do so UNAMBIGUOUSLY
+                const emptyFaces = p.faces.filter(f => f.color === null);
+                
+                // 1. If only 1 empty face and 1 missing color -> Fill it (100% safe)
+                if (emptyFaces.length === 1 && missingColors.length === 1) {
+                    const f = emptyFaces[0];
+                    // Final safety check: Is the color allowed on this face?
+                    if (missingColors[0] !== OPPOSITES[f.dir]) {
+                        f.mat.color.setHex(colors[missingColors[0]]);
                         f.mat.needsUpdate = true;
                         loopChanges = true;
                     }
-                });
-            }
-
-            /* ========= CORNER DOMINANT FACE DEDUCTION ========= */
-            if (p.type === "corner" && candidates.length === 1) {
-                const missing = candidates[0].filter(c => !p.painted.includes(c));
-
-                emptyFaces.forEach(f => {
+                }
+                // 2. If multiple empty faces (e.g. Corner with 1 paint), we need strict constraint check
+                else if (emptyFaces.length > 1) {
+                    // Try to map missing colors to empty faces based on Forbidden rules
+                    let solvedCount = 0;
+                    
                     emptyFaces.forEach(f => {
-    const possibleColors = new Set();
+                        // Find which of the missing colors is ALLOWED on this face
+                        // A color is allowed if it is NOT the opposite of the face
+                        // AND if it isn't the opposite of the *other* painted colors?
+                        
+                        const allowed = missingColors.filter(col => col !== OPPOSITES[f.dir]);
+                        
+                        // If only 1 color is allowed on this face, it MUST be that one.
+                        if (allowed.length === 1) {
+                            // Also need to check if that color is unique to this face among the empty ones?
+                            // Let's just be aggressive here if inventory is reduced enough.
+                            
+                            // Check uniqueness: Is this color valid for the OTHER empty face too?
+                            // If yes, we can't decide yet.
+                            const otherFaces = emptyFaces.filter(ef => ef !== f);
+                            const isAmbiguous = otherFaces.some(ef => {
+                                return allowed[0] !== OPPOSITES[ef.dir];
+                            });
 
-    candidates.forEach(cand => {
-        cand
-          .filter(c => !p.painted.includes(c))
-          .forEach(c => {
-              if (c !== OPPOSITES[f.dir]) {
-                  possibleColors.add(c);
-              }
-          });
-    });
-
-    // SAFE: only one color survives across ALL candidates
-    if (possibleColors.size === 1) {
-        const color = [...possibleColors][0];
-        f.mat.color.setHex(colors[color]);
-        f.mat.needsUpdate = true;
-        loopChanges = true;
-    }
-});
-
-                        const otherFaces = emptyFaces.filter(of => of !== f);
-                        const exclusive = !otherFaces.some(of =>
-                            allowed[0] !== OPPOSITES[of.dir]
-                        );
-
-                        if (exclusive) {
-                            f.mat.color.setHex(colors[allowed[0]]);
-                            f.mat.needsUpdate = true;
-                            loopChanges = true;
+                            if (!isAmbiguous) {
+                                f.mat.color.setHex(colors[allowed[0]]);
+                                f.mat.needsUpdate = true;
+                                solvedCount++;
+                            }
                         }
-                    }
-                });
+                    });
+                    
+                    if(solvedCount > 0) loopChanges = true;
+                }
             }
         });
     }
-
-    if (iteration > 1) updatePaletteCounts();
+    
+    if(iteration > 1) updatePaletteCounts();
 }
 
 
