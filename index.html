@@ -1,43 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Offline Solver</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <title>Rubik's Cube Solver</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Three.js -->
+  <script src="three.min.js"></script>
 </head>
 <body>
 
-    <div id="ui-top">
-        <div class="palette">
-            <div class="swatch selected" style="background:#FFFFFF" data-c="U" onclick="selectColor(this, 'U')"></div>
-            <div class="swatch" style="background:#B90000" data-c="R" onclick="selectColor(this, 'R')"></div>
-            <div class="swatch" style="background:#009E60" data-c="F" onclick="selectColor(this, 'F')"></div>
-            <div class="swatch" style="background:#FFD500" data-c="D" onclick="selectColor(this, 'D')"></div>
-            <div class="swatch" style="background:#FF5800" data-c="L" onclick="selectColor(this, 'L')"></div>
-            <div class="swatch" style="background:#0051BA" data-c="B" onclick="selectColor(this, 'B')"></div>
-        </div>
-        <div id="instruction">Select color & tap faces to paint</div>
+  <!-- TOP CONTROLS -->
+  <div id="top-panel">
+    <div id="palette">
+      <div class="swatch white selected" data-color="U" onclick="selectColor(this,'U')">
+        <span class="count">0</span>
+      </div>
+      <div class="swatch red" data-color="R" onclick="selectColor(this,'R')">
+        <span class="count">0</span>
+      </div>
+      <div class="swatch green" data-color="F" onclick="selectColor(this,'F')">
+        <span class="count">0</span>
+      </div>
+      <div class="swatch yellow" data-color="D" onclick="selectColor(this,'D')">
+        <span class="count">0</span>
+      </div>
+      <div class="swatch orange" data-color="L" onclick="selectColor(this,'L')">
+        <span class="count">0</span>
+      </div>
+      <div class="swatch blue" data-color="B" onclick="selectColor(this,'B')">
+        <span class="count">0</span>
+      </div>
     </div>
 
-    <div id="canvas-container"></div>
+    <div id="instruction">Select color & tap faces to paint</div>
+  </div>
 
-    <div id="ui-bottom">
-        <div id="status">System Ready</div>
-        
-        <div class="controls" id="action-controls">
-            <button class="btn" onclick="resetCube()">RESET</button>
-            <button class="btn solve-btn" onclick="solveCube()">SOLVE CUBE</button>
-        </div>
+  <!-- CANVAS -->
+  <div id="canvas-container"></div>
 
-        <div id="playback-controls" style="display:none;">
-            <button class="btn" onclick="prevMove()">PREV</button>
-            <button class="btn" id="playPauseBtn" onclick="togglePlay()">PLAY</button>
-            <button class="btn" onclick="nextMove()">NEXT</button>
-        </div>
-    </div>
+  <!-- STATUS -->
+  <div id="status">Loading engine…</div>
+  <div id="solutionText"></div>
 
-    <script src="three.min.js"></script>
-    <script src="script.js"></script>
+  <!-- ACTION CONTROLS -->
+  <div id="action-controls">
+    <button onclick="scrambleCube()">SCRAMBLE</button>
+    <button onclick="solveCube()" class="primary">SOLVE CUBE</button>
+  </div>
+
+  <!-- PLAYBACK CONTROLS -->
+  <div id="playback-controls">
+    <button onclick="prevMove()">◀</button>
+    <button id="playPauseBtn" onclick="togglePlay()">PLAY</button>
+    <button onclick="nextMove()">▶</button>
+  </div>
+
+  <!-- RESET -->
+  <div id="reset-container">
+    <button id="resetBtn" onclick="resetCube()">RESET</button>
+  </div>
+
+  <!-- SCRIPT -->
+  <script src="script.js"></script>
+
 </body>
 </html>
+
