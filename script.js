@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – RECURSIVE LOGICAL AUTOFILL
+   RUBIK'S CUBE SOLVER – BIDIRECTIONAL LOGIC (MAX AUTOFILL)
    ========================================================= */
 
 /* =======================
@@ -127,7 +127,6 @@ function init() {
     scene.add(pivotGroup);
 
     createCube();
-    
     pivotGroup.rotation.x = 0;
     pivotGroup.rotation.y = -0.5;
 
@@ -152,12 +151,12 @@ function createCube() {
         for (let y = -1; y <= 1; y++)
             for (let z = -1; z <= 1; z++) {
                 const mats = [
-                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }), // Right
-                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }), // Left
-                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }), // Top
-                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }), // Bottom
-                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }), // Front
-                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })  // Back
+                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }), // R
+                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }), // L
+                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }), // U
+                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }), // D
+                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }), // F
+                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })  // B
                 ];
                 const cube = new THREE.Mesh(geo, mats);
                 cube.position.set(x, y, z);
@@ -209,18 +208,18 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 }
 
 /* =======================
-   RECURSIVE LOGICAL DEDUCTION (The Brain)
+   BIDIRECTIONAL LOGICAL AUTOFILL
 ======================= */
 function runLogicalAutofill() {
     let loopChanges = true;
     let iteration = 0;
 
-    // Loop until we can't deduce any more moves (Recursion via Loop)
+    // We loop because filling one piece might solve another
     while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
 
-        // 1. Snapshot Board: List all 20 pieces and their current colors
+        // 1. Snapshot: Build list of Board Pieces & their current state
         let boardPieces = []; 
 
         const getExposedFaces = (c) => {
@@ -245,7 +244,6 @@ function runLogicalAutofill() {
             return exposed;
         };
 
-        // Gather all 20 movable pieces
         cubes.forEach(c => {
             if(c.userData.isCenter) return;
             const faces = getExposedFaces(c);
@@ -253,7 +251,7 @@ function runLogicalAutofill() {
             
             const paintedColors = faces.map(f => f.color).filter(c => c !== null);
             boardPieces.push({
-                obj: c, // Reference for later
+                id: c.uuid, // Unique ID to track assignments
                 type: faces.length === 3 ? 'corner' : 'edge',
                 faces: faces,
                 painted: paintedColors,
@@ -261,12 +259,10 @@ function runLogicalAutofill() {
             });
         });
 
-        // 2. Identify Candidates (Inventory Management)
-        // Start with full inventory
+        // 2. Inventory: Remove pieces that are already fully painted on board
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
-        // Remove pieces that are ALREADY placed on the board (Completed ones)
         boardPieces.forEach(p => {
             if (p.isComplete) {
                 const set = new Set(p.painted);
@@ -280,43 +276,71 @@ function runLogicalAutofill() {
             }
         });
 
-        // 3. Deduce Unknowns
+        // 3. Logic A: Forward Deduction (Piece -> Candidate)
+        // "This specific board piece can only be ONE candidate from the inventory."
         boardPieces.forEach(p => {
-            if (p.isComplete) return; // Skip done
-            if (p.painted.length === 0) return; // Skip empty (too many possibilities)
+            if (p.isComplete) return;
+            if (p.painted.length === 0) return; 
 
-            // Find all possible candidates for THIS piece based on what we've painted so far
             let candidates = [];
-            if (p.type === 'corner') {
-                candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
-            } else {
-                candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
-            }
+            if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
+            else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
 
-            // THE MAGIC: If only ONE candidate fits, we found it!
             if (candidates.length === 1) {
-                const match = candidates[0];
-                const missing = match.filter(c => !p.painted.includes(c));
-                
-                // Fill the empty faces
-                p.faces.forEach(f => {
-                    // CRITICAL CHECK: Only fill if it is NULL (Empty/Grey)
-                    // This prevents overwriting user manual inputs
-                    if (f.color === null && missing.length > 0) {
-                        const fill = missing.shift(); 
-                        f.mat.color.setHex(colors[fill]);
-                        f.mat.needsUpdate = true;
-                        loopChanges = true; // We changed something, so we must loop again!
-                    }
-                });
+                fillPiece(p, candidates[0]);
+                loopChanges = true;
             }
         });
+
+        // 4. Logic B: Reverse Deduction (Candidate -> Piece)
+        // "This candidate from the inventory can only fit into ONE specific slot on the board."
+        if (!loopChanges) {
+            // Check Corners
+            availableCorners.forEach(cand => {
+                // Find all incomplete board corners compatible with this candidate
+                const compatiblePieces = boardPieces.filter(p => 
+                    p.type === 'corner' && 
+                    !p.isComplete && 
+                    p.painted.every(col => cand.includes(col))
+                );
+
+                // If only 1 piece matches this candidate, it MUST be this one
+                if (compatiblePieces.length === 1) {
+                    fillPiece(compatiblePieces[0], cand);
+                    loopChanges = true;
+                }
+            });
+
+            // Check Edges
+            availableEdges.forEach(cand => {
+                const compatiblePieces = boardPieces.filter(p => 
+                    p.type === 'edge' && 
+                    !p.isComplete && 
+                    p.painted.every(col => cand.includes(col))
+                );
+
+                if (compatiblePieces.length === 1) {
+                    fillPiece(compatiblePieces[0], cand);
+                    loopChanges = true;
+                }
+            });
+        }
     }
 
-    if(iteration > 1) {
-        statusEl.innerText = "Auto-filled logical pieces!";
-        updatePaletteCounts();
-    }
+    if(iteration > 1) updatePaletteCounts();
+}
+
+// Helper to actually paint the faces
+function fillPiece(p, candidateColors) {
+    const missing = candidateColors.filter(c => !p.painted.includes(c));
+    
+    p.faces.forEach(f => {
+        if (f.color === null && missing.length > 0) {
+            const fill = missing.shift(); 
+            f.mat.color.setHex(colors[fill]);
+            f.mat.needsUpdate = true;
+        }
+    });
 }
 
 /* =======================
@@ -347,7 +371,7 @@ function handlePaint(clientX, clientY) {
         mat.color.setHex(colors[paintColor]);
         mat.needsUpdate = true;
         
-        // Trigger Recursive Logic
+        // Trigger Logic
         runLogicalAutofill();
         updatePaletteCounts();
     }
