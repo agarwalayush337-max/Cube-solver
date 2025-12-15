@@ -1,9 +1,9 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – FULL & STABLE script.js
+   RUBIK'S CUBE SOLVER – FINAL STABLE script.js
    ========================================================= */
 
 /* =======================
-   1. CONFIGURATION
+   CONFIG
 ======================= */
 const colors = {
     U: 0xffffff,
@@ -33,7 +33,7 @@ function getColorChar(hex) {
 }
 
 /* =======================
-   2. GLOBAL STATE
+   GLOBAL STATE
 ======================= */
 let scene, camera, renderer;
 let raycaster, mouse;
@@ -52,7 +52,7 @@ let isDragging = false;
 let lastMouse = { x: 0, y: 0 };
 
 /* =======================
-   3. WORKER
+   WORKER
 ======================= */
 const statusEl = document.getElementById("status");
 statusEl.innerText = "Loading engine…";
@@ -71,12 +71,6 @@ solverWorker.onmessage = (e) => {
     }
 
     if (d.type === "solution") {
-        if (!d.solution || !d.solution.trim()) {
-            statusEl.innerText = "Invalid or already solved cube";
-            statusEl.style.color = "red";
-            return;
-        }
-
         solutionMoves = d.solution.trim().split(/\s+/);
         moveIndex = 0;
 
@@ -86,13 +80,11 @@ solverWorker.onmessage = (e) => {
         updateStepStatus();
     }
 
-    if (d.type === "error") {
-        alert(d.message);
-    }
+    if (d.type === "error") alert(d.message);
 };
 
 /* =======================
-   4. INIT SCENE
+   INIT SCENE
 ======================= */
 init();
 animate();
@@ -101,12 +93,7 @@ function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a1a);
 
-    camera = new THREE.PerspectiveCamera(
-        45,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        100
-    );
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(0, 0, 11);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -134,7 +121,7 @@ function init() {
 }
 
 /* =======================
-   5. NUMBER TEXTURE
+   NUMBER TEXTURE (FIXED)
 ======================= */
 function createNumberTexture(num) {
     const size = 128;
@@ -143,17 +130,19 @@ function createNumberTexture(num) {
     const ctx = canvas.getContext("2d");
 
     ctx.clearRect(0, 0, size, size);
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillStyle = "rgba(0,0,0,0.8)";
     ctx.font = "bold 72px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(num, size / 2, size / 2);
 
-    return new THREE.CanvasTexture(canvas);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
 }
 
 /* =======================
-   6. CUBE CREATION
+   CUBE CREATION
 ======================= */
 function createCube() {
     const geo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
@@ -161,6 +150,7 @@ function createCube() {
     for (let x = -1; x <= 1; x++)
         for (let y = -1; y <= 1; y++)
             for (let z = -1; z <= 1; z++) {
+
                 const mats = [
                     new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }),
                     new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }),
@@ -185,18 +175,21 @@ function createCube() {
 }
 
 /* =======================
-   7. PAINTING
+   COLOR COUNT
+======================= */
+function countColors(state) {
+    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
+    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
+    return c;
+}
+
+/* =======================
+   PAINTING (BUG-FREE)
 ======================= */
 function selectColor(el, c) {
     paintColor = c;
     document.querySelectorAll(".swatch").forEach(s => s.classList.remove("selected"));
     el.classList.add("selected");
-}
-
-function countColors(state) {
-    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
-    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
-    return c;
 }
 
 function handlePaintClick(x, y) {
@@ -214,16 +207,17 @@ function handlePaintClick(x, y) {
         return;
     }
 
-    hit.object.material[hit.face.materialIndex].color.setHex(colors[paintColor]);
+    const mat = hit.object.material[hit.face.materialIndex];
+    mat.color.setHex(colors[paintColor]);
 
     const counts = countColors(getCubeStateString());
-    const tex = createNumberTexture(counts[paintColor]);
-    hit.object.material[hit.face.materialIndex].map = tex;
-    hit.object.material[hit.face.materialIndex].needsUpdate = true;
+    mat.emissive = new THREE.Color(0xffffff);
+    mat.emissiveMap = createNumberTexture(counts[paintColor]);
+    mat.needsUpdate = true;
 }
 
 /* =======================
-   8. INPUT HANDLERS
+   INPUT
 ======================= */
 function onMouseDown(e) {
     isMouseDown = true;
@@ -254,13 +248,13 @@ function onMouseUp(e) {
 }
 
 /* =======================
-   9. CUBE STATE CAPTURE
+   CUBE STATE CAPTURE
 ======================= */
 function getCubeStateString() {
     let state = "";
 
-    const find = (x, y, z) =>
-        cubes.find(c => c.userData.ix === x && c.userData.iy === y && c.userData.iz === z);
+    const find = (x,y,z) =>
+        cubes.find(c => c.userData.ix===x && c.userData.iy===y && c.userData.iz===z);
 
     const faces = [
         [[-1,1,-1],[0,1,-1],[1,1,-1],[-1,1,0],[0,1,0],[1,1,0],[-1,1,1],[0,1,1],[1,1,1]],
@@ -273,42 +267,41 @@ function getCubeStateString() {
 
     const mats = [2,0,4,3,1,5];
 
-    faces.forEach((face, i) =>
-        face.forEach(p => {
+    faces.forEach((face,i)=>
+        face.forEach(p=>{
             const c = find(...p);
             state += getColorChar(c.material[mats[i]].color.getHex());
         })
     );
-
     return state;
 }
 
 /* =======================
-   10. SOLVE (WITH VALIDATION)
+   SOLVE (VALIDATED)
 ======================= */
 function solveCube() {
-    if (!engineReady) return alert("Engine still loading");
+    if (!engineReady) return alert("Engine loading");
 
     const cube = getCubeStateString();
     const counts = countColors(cube);
 
     const errors = Object.entries(counts)
-        .filter(([k,v]) => v !== 9)
-        .map(([k,v]) => `${k}: ${v}/9`);
+        .filter(([k,v])=>v!==9)
+        .map(([k,v])=>`${k}: ${v}/9`);
 
     if (errors.length) {
-        alert("❌ Invalid cube\n\n" + errors.join("\n"));
+        alert("Invalid cube:\n" + errors.join("\n"));
         return;
     }
 
     statusEl.innerText = "Analyzing…";
     statusEl.style.color = "orange";
 
-    solverWorker.postMessage({ type: "solve", cube });
+    solverWorker.postMessage({ type:"solve", cube });
 }
 
 /* =======================
-   11. ROTATION ENGINE
+   ROTATION ENGINE
 ======================= */
 function rotateFace(move, reverse=false) {
     if (isAnimating) return;
@@ -317,33 +310,32 @@ function rotateFace(move, reverse=false) {
     let face = move[0];
     let prime = move.includes("'");
     let twice = move.includes("2");
-
     if (reverse) prime = !prime;
 
     let axis, dir = prime ? 1 : -1;
     let group = [];
 
-    cubes.forEach(c => {
-        if (face==="R" && c.position.x>0.5) axis="x",group.push(c);
-        if (face==="L" && c.position.x<-0.5) axis="x",dir*=-1,group.push(c);
-        if (face==="U" && c.position.y>0.5) axis="y",group.push(c);
-        if (face==="D" && c.position.y<-0.5) axis="y",dir*=-1,group.push(c);
-        if (face==="F" && c.position.z>0.5) axis="z",group.push(c);
-        if (face==="B" && c.position.z<-0.5) axis="z",dir*=-1,group.push(c);
+    cubes.forEach(c=>{
+        if(face==="R"&&c.position.x>0.5)axis="x",group.push(c);
+        if(face==="L"&&c.position.x<-0.5)axis="x",dir*=-1,group.push(c);
+        if(face==="U"&&c.position.y>0.5)axis="y",group.push(c);
+        if(face==="D"&&c.position.y<-0.5)axis="y",dir*=-1,group.push(c);
+        if(face==="F"&&c.position.z>0.5)axis="z",group.push(c);
+        if(face==="B"&&c.position.z<-0.5)axis="z",dir*=-1,group.push(c);
     });
 
     const pivot = new THREE.Object3D();
     pivotGroup.add(pivot);
-    group.forEach(c => pivot.attach(c));
+    group.forEach(c=>pivot.attach(c));
 
     const angle = (twice ? Math.PI : Math.PI/2) * dir;
     const start = Date.now();
 
-    function step() {
-        const p = Math.min((Date.now() - start)/250,1);
-        pivot.rotation[axis] = angle*p;
-        if (p<1) requestAnimationFrame(step);
-        else {
+    function step(){
+        const p=Math.min((Date.now()-start)/250,1);
+        pivot.rotation[axis]=angle*p;
+        if(p<1)requestAnimationFrame(step);
+        else{
             group.forEach(c=>pivotGroup.attach(c));
             pivotGroup.remove(pivot);
             isAnimating=false;
@@ -353,21 +345,21 @@ function rotateFace(move, reverse=false) {
 }
 
 /* =======================
-   12. PLAYBACK CONTROLS
+   PLAYBACK
 ======================= */
 function updateStepStatus() {
     statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length}`;
 }
 
 function nextMove() {
-    if (isAnimating || moveIndex >= solutionMoves.length) return;
+    if (isAnimating || moveIndex>=solutionMoves.length) return;
     rotateFace(solutionMoves[moveIndex]);
     moveIndex++;
     updateStepStatus();
 }
 
 function prevMove() {
-    if (isAnimating || moveIndex <= 0) return;
+    if (isAnimating || moveIndex<=0) return;
     moveIndex--;
     rotateFace(solutionMoves[moveIndex], true);
     updateStepStatus();
@@ -378,22 +370,21 @@ function togglePlay() {
 
     if (playInterval) {
         clearInterval(playInterval);
-        playInterval = null;
-        if (btn) btn.innerText = "PLAY";
+        playInterval=null;
+        if(btn)btn.innerText="PLAY";
     } else {
-        if (!solutionMoves.length) return;
-        if (btn) btn.innerText = "PAUSE";
-
-        playInterval = setInterval(() => {
-            if (!isAnimating) {
-                if (moveIndex < solutionMoves.length) nextMove();
-                else {
+        if(!solutionMoves.length)return;
+        if(btn)btn.innerText="PAUSE";
+        playInterval=setInterval(()=>{
+            if(!isAnimating){
+                if(moveIndex<solutionMoves.length)nextMove();
+                else{
                     clearInterval(playInterval);
-                    playInterval = null;
-                    if (btn) btn.innerText = "PLAY";
+                    playInterval=null;
+                    if(btn)btn.innerText="PLAY";
                 }
             }
-        }, 600);
+        },600);
     }
 }
 
@@ -402,10 +393,9 @@ function resetCube() {
 }
 
 /* =======================
-   13. RENDER LOOP
+   RENDER
 ======================= */
 function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
 }
-
