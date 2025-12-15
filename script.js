@@ -222,15 +222,14 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 function runLogicalAutofill() {
     let changed = true;
     let iterations = 0;
-    const MAX_ITER = 50;
+    const MAX_ITER = 100;
 
     while (changed && iterations < MAX_ITER) {
         changed = false;
         iterations++;
 
-        // === 1. Collect current board state: exposed faces and their colors ===
-        const boardSlots = [];
-
+        // Step 1: Collect all visible slots (edges & corners)
+        const slots = [];
         cubes.forEach(c => {
             if (c.userData.isCenter) return;
 
@@ -240,117 +239,134 @@ function runLogicalAutofill() {
                 z: Math.round(c.position.z)
             };
 
-            const exposed = [];
-            const checkFace = (dx, dy, dz, faceName) => {
-                if ((dx !== 0 && pos.x === dx) ||
-                    (dy !== 0 && pos.y === dy) ||
-                    (dz !== 0 && pos.z === dz)) {
-                    const worldNormal = new THREE.Vector3(dx, dy, dz);
-                    const matIdx = getVisibleFaceMatIndex(c, worldNormal);
-                    if (matIdx !== -1) {
-                        const colorName = getColorName(c.material[matIdx].color.getHex());
-                        exposed.push({
-                            dir: faceName,
-                            mat: c.material[matIdx],
-                            color: colorName // null if unpainted
+            const faces = [];
+            const check = (dx, dy, dz, name) => {
+                if ((dx && pos.x === dx) || (dy && pos.y === dy) || (dz && pos.z === dz)) {
+                    const normal = new THREE.Vector3(dx || 0, dy || 0, dz || 0);
+                    const idx = getVisibleFaceMatIndex(c, normal);
+                    if (idx !== -1) {
+                        const colorName = getColorName(c.material[idx].color.getHex());
+                        faces.push({
+                            dir: name,
+                            mat: c.material[idx],
+                            color: colorName  // null if grey
                         });
                     }
                 }
             };
 
-            checkFace(0, 1, 0, "U"); checkFace(0, -1, 0, "D");
-            checkFace(1, 0, 0, "R"); checkFace(-1, 0, 0, "L");
-            checkFace(0, 0, 1, "F"); checkFace(0, 0, -1, "B");
+            check(0, 1, 0, "U"); check(0, -1, 0, "D");
+            check(1, 0, 0, "R"); check(-1, 0, 0, "L");
+            check(0, 0, 1, "F"); check(0, 0, -1, "B");
 
-            if (exposed.length === 0) return;
+            if (faces.length === 0) return;
 
-            const knownColors = exposed.map(f => f.color).filter(c => c !== null);
-            const type = exposed.length === 3 ? 'corner' : 'edge';
+            const knownColors = faces.filter(f => f.color).map(f => f.color);
+            const emptyFaces = faces.filter(f => !f.color);
 
-            boardSlots.push({
+            slots.push({
                 cube: c,
-                type,
-                faces: exposed,
-                known: knownColors,
-                emptyFaces: exposed.filter(f => f.color === null)
+                faces,
+                knownColors,
+                emptyFaces,
+                type: faces.length === 3 ? 'corner' : 'edge',
+                numColors: faces.length
             });
         });
 
-        if (boardSlots.length === 0) break;
+        if (slots.length === 0) break;
 
-        // === 2. Build available pieces (remove fully identified ones) ===
-        let available = JSON.parse(JSON.stringify(STANDARD_PIECES));
+        // Step 2: Available pieces pool (deep copy)
+        let availablePieces = JSON.parse(JSON.stringify(STANDARD_PIECES));
 
-        // Remove pieces that are already fully painted and matched
-        boardSlots.forEach(slot => {
+        // Remove any fully painted and uniquely identified pieces
+        slots.forEach(slot => {
             if (slot.emptyFaces.length === 0) {
-                const set = new Set(slot.known);
-                const idx = available.findIndex(p => 
-                    p.length === slot.known.length && p.every(col => set.has(col))
+                const set = new Set(slot.knownColors);
+                const idx = availablePieces.findIndex(p =>
+                    p.length === slot.knownColors.length &&
+                    p.every(col => set.has(col))
                 );
-                if (idx !== -1) available.splice(idx, 1);
+                if (idx !== -1) availablePieces.splice(idx, 1);
             }
         });
 
-        // === 3. For each slot: find possible candidate pieces ===
-        boardSlots.forEach(slot => {
-            if (slot.emptyFaces.length === 0) return; // already complete
+        // Step 3: For each slot, compute current possible pieces (domain)
+        const domains = slots.map(slot => {
+            let candidates = availablePieces.filter(piece =>
+                piece.length === slot.numColors &&
+                slot.knownColors.every(k => piece.includes(k))
+            );
 
-            let candidates = available.filter(piece => {
-                if (piece.length !== (slot.type === 'corner' ? 3 : 2)) return false;
-                // Must contain all known colors
-                return slot.known.every(k => piece.includes(k));
-            });
-
-            // Apply opposite-face constraint: no piece can place opposite color on a face
+            // Filter by orientation: must be possible to orient without opposite color on any face
             candidates = candidates.filter(piece => {
-                // Try all possible rotations/orientations implicitly via assignment check
-                // For edges: 2 possible flips
-                // For corners: 3 possible rotations
-                const required = slot.type === 'corner' ? 3 : 2;
-                const colors = piece.slice();
+                const missing = piece.filter(c => !slot.knownColors.includes(c));
+                const allPerms = slot.type === 'corner'
+                    ? generateCornerPermutations(piece)
+                    : generateEdgeFlips(piece);
 
-                // Generate all permutations for corners, flips for edges
-                const permutations = slot.type === 'corner'
-                    ? generateCornerPermutations(colors)
-                    : generateEdgeFlips(colors);
-
-                return permutations.some(perm => {
-                    return slot.faces.every(face => {
-                        if (face.color !== null) return true; // already matches
-                        const assignedColor = perm[slot.faces.indexOf(face)];
-                        return assignedColor !== OPPOSITES[face.dir];
+                return allPerms.some(perm => {
+                    let valid = true;
+                    slot.faces.forEach((face, i) => {
+                        const assigned = perm[i];
+                        if (face.color === null && assigned === OPPOSITES[face.dir]) {
+                            valid = false;
+                        }
                     });
+                    return valid;
                 });
             });
 
-            // === Deduction 1: Only one candidate → fill all missing ===
+            return candidates;
+        });
+
+        // Step 4: Deduction Loop
+        for (let i = 0; i < slots.length; i++) {
+            const slot = slots[i];
+            const candidates = domains[i];
+
+            if (slot.emptyFaces.length === 0) continue;
+
+            // Deduction A: Singleton piece → fill everything possible
             if (candidates.length === 1) {
                 const piece = candidates[0];
-                const missingColors = piece.filter(c => !slot.known.includes(c));
+                const missingColors = piece.filter(c => !slot.knownColors.includes(c));
 
-                // Try to assign missing colors respecting opposites
-                const perm = findValidAssignment(slot.faces, slot.known, missingColors);
-                if (perm) {
-                    let filled = false;
-                    slot.faces.forEach((face, i) => {
-                        if (face.color === null && perm[i] !== undefined) {
-                            face.mat.color.setHex(colors[perm[i]]);
-                            face.mat.needsUpdate = true;
-                            filled = true;
+                // Find a valid orientation
+                const perms = slot.type === 'corner'
+                    ? generateCornerPermutations(piece)
+                    : generateEdgeFlips(piece);
+
+                for (const perm of perms) {
+                    let valid = true;
+                    const assignment = [];
+
+                    slot.faces.forEach((face, fi) => {
+                        if (face.color) {
+                            if (face.color !== perm[fi]) valid = false;
+                        } else {
+                            if (perm[fi] === OPPOSITES[face.dir]) valid = false;
+                            assignment.push({ face, color: perm[fi] });
                         }
                     });
-                    if (filled) changed = true;
+
+                    if (valid) {
+                        assignment.forEach(a => {
+                            a.face.mat.color.setHex(colors[a.color]);
+                            a.face.mat.needsUpdate = true;
+                            changed = true;
+                        });
+                        break;
+                    }
                 }
             }
 
-            // === Deduction 2: For each empty face, check if only ONE color is possible ===
-            if (candidates.length > 0) {
+            // Deduction B: For each empty face, collect possible colors across candidates
+            else if (candidates.length > 0) {
                 slot.emptyFaces.forEach(emptyFace => {
                     const possibleColors = new Set();
 
                     candidates.forEach(piece => {
-                        const missing = piece.filter(c => !slot.known.includes(c));
                         const perms = slot.type === 'corner'
                             ? generateCornerPermutations(piece)
                             : generateEdgeFlips(piece);
@@ -365,71 +381,31 @@ function runLogicalAutofill() {
                     });
 
                     if (possibleColors.size === 1) {
-                        const onlyColor = [...possibleColors][0];
-                        emptyFace.mat.color.setHex(colors[onlyColor]);
+                        const forcedColor = [...possibleColors][0];
+                        emptyFace.mat.color.setHex(colors[forcedColor]);
                         emptyFace.mat.needsUpdate = true;
                         changed = true;
                     }
                 });
             }
-        });
+        }
     }
 
-    if (changed || iterations > 1) {
-        updatePaletteCounts();
-    }
+    if (iterations > 1) updatePaletteCounts();
 }
 
-// Helper: generate all valid corner rotations (3 cycles)
+// --- Helper functions (keep these if not already present) ---
 function generateCornerPermutations(colors) {
-    const perms = [];
-    const c = colors.slice();
-    perms.push(c.slice());
-    // Rotate first color to second and third position
-    perms.push([c[1], c[2], c[0]]);
-    perms.push([c[2], c[0], c[1]]);
-    return perms;
+    return [
+        colors.slice(),
+        [colors[1], colors[2], colors[0]],
+        [colors[2], colors[0], colors[1]]
+    ];
 }
 
-// Helper: generate both flips for edges
 function generateEdgeFlips(colors) {
     return [colors.slice(), [colors[1], colors[0]]];
 }
-
-// Try to find a valid assignment of missing colors to empty faces
-function findValidAssignment(faces, knownColors, missingColors) {
-    const emptyIndices = faces
-        .map((f, i) => f.color === null ? i : -1)
-        .filter(i => i !== -1);
-
-    if (emptyIndices.length !== missingColors.length) return null;
-
-    const perms = permute(missingColors);
-    for (const perm of perms) {
-        let valid = true;
-        emptyIndices.forEach((idx, i) => {
-            if (perm[i] === OPPOSITES[faces[idx].dir]) {
-                valid = false;
-            }
-        });
-        if (valid) return faces.map((f, i) => f.color || perm[emptyIndices.indexOf(i)]);
-    }
-    return null;
-}
-
-// Simple permutation generator
-function permute(arr) {
-    if (arr.length <= 1) return [arr.slice()];
-    const result = [];
-    for (let i = 0; i < arr.length; i++) {
-        const rest = arr.slice(0, i).concat(arr.slice(i + 1));
-        for (const p of permute(rest)) {
-            result.push([arr[i]].concat(p));
-        }
-    }
-    return result;
-}
-
 
 /* =======================
    INTERACTION
