@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – PERFECT LOGIC (NO GUESSING)
+   RUBIK'S CUBE SOLVER – PERFECT "SUDOKU" LOGIC
    ========================================================= */
 
 /* =======================
@@ -15,7 +15,7 @@ const colors = {
     Core: 0x202020 // Dark Grey (Internal)
 };
 
-// Valid Piece Definitions (Standard Color Scheme)
+// All 20 Valid Movable Pieces (Standard Scheme)
 const ALL_CORNERS = [
     ["U","R","F"], ["U","F","L"], ["U","L","B"], ["U","B","R"],
     ["D","F","R"], ["D","L","F"], ["D","B","L"], ["D","R","B"]
@@ -152,11 +152,11 @@ function createCube() {
             for (let z = -1; z <= 1; z++) {
                 const mats = [
                     new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }), 
-                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }),
+                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }), 
                     new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }), 
-                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }),
+                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }), 
                     new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }), 
-                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core }) 
+                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })  
                 ];
                 const cube = new THREE.Mesh(geo, mats);
                 cube.position.set(x, y, z);
@@ -207,36 +207,19 @@ function getVisibleFaceMatIndex(cube, worldDir) {
     return -1;
 }
 
-// Find the adjacent Edge piece in a specific direction from a corner
-function getNeighborColor(cx, cy, cz, dir) {
-    // dir is Vector3 (e.g., 1,0,0 for Right)
-    // The neighbor edge will share 2 coordinates with the corner
-    // Corner at cx,cy,cz. Edge in 'dir' direction will be at same coords?
-    // No, neighbors are separate cubes.
-    // If Corner is (1,1,1). The "Right" face of the corner is at world x=1.
-    // The Edge touching that "Right" face is the one at (1, ?, ?).
-    // Actually, "Neighbors" for orientation means:
-    // If I am Corner(1,1,1), my Right Face (normal 1,0,0) is physically adjacent to 
-    // the Edge at (1, 1, 0) [Right-Up Edge] ?? No.
-    // The Right Face of Corner(1,1,1) is on the RIGHT side of the cube.
-    // The adjacent Edge on that same face is Edge(1,0,1) [Right-Front] or Edge(1,1,0) [Right-Up].
-    // Let's keep it simple: We just check if *any* adjacent piece on that face has a known color.
-    return null; // Too complex for simple helper, logic handled in fillPiece
-}
-
 /* =======================
-   SMART AUTOFILL (BIDIRECTIONAL)
+   RECURSIVE LOGICAL FILL (FORWARD + REVERSE)
 ======================= */
 function runLogicalAutofill() {
     let loopChanges = true;
     let iteration = 0;
 
-    // Loop until stable (Sudoku style deduction)
-    while (loopChanges && iteration < 15) {
+    // Loop until deductions stabilize
+    while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
 
-        // 1. Build Board Snapshot
+        // 1. Snapshot: Get state of all 20 movable pieces
         let boardPieces = []; 
 
         const getExposedFaces = (c) => {
@@ -251,7 +234,7 @@ function runLogicalAutofill() {
                     if (matIdx !== -1) {
                         const mat = c.material[matIdx];
                         const k = getColorKey(mat.color.getHex());
-                        exposed.push({ dir: faceName, norm: norm, mat: mat, color: k });
+                        exposed.push({ dir: faceName, mat: mat, color: k });
                     }
                 }
             };
@@ -269,7 +252,6 @@ function runLogicalAutofill() {
             const paintedColors = faces.map(f => f.color).filter(c => c !== null);
             boardPieces.push({
                 obj: c,
-                pos: c.position.clone(),
                 type: faces.length === 3 ? 'corner' : 'edge',
                 faces: faces,
                 painted: paintedColors,
@@ -277,7 +259,7 @@ function runLogicalAutofill() {
             });
         });
 
-        // 2. Inventory Management
+        // 2. Inventory: Remove pieces that are already fully painted/identified
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
@@ -285,16 +267,19 @@ function runLogicalAutofill() {
             if (p.isComplete) {
                 const set = new Set(p.painted);
                 if(p.type === 'corner') {
+                    // Remove matching corner from inventory
                     const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
                     if(idx !== -1) availableCorners.splice(idx, 1);
                 } else {
+                    // Remove matching edge
                     const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
                     if(idx !== -1) availableEdges.splice(idx, 1);
                 }
             }
         });
 
-        // 3. Logic: Deduce & Fill
+        // 3. LOGIC A: FORWARD DEDUCTION
+        // "I am Piece X. I have colors [White, Red]. Only [White, Red, Blue] is left in inventory. I must be Blue."
         boardPieces.forEach(p => {
             if (p.isComplete) return; 
             if (p.painted.length === 0) return; 
@@ -303,88 +288,59 @@ function runLogicalAutofill() {
             if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
             else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
 
-            // If we are 100% sure which piece this is:
             if (candidates.length === 1) {
-                const didFill = safeFill(p, candidates[0], boardPieces);
-                if(didFill) loopChanges = true;
+                if(fillPiece(p, candidates[0])) loopChanges = true;
             }
         });
+
+        // 4. LOGIC B: REVERSE DEDUCTION (INVERSE)
+        // "I am the [White, Red, Green] candidate in inventory. Only one empty slot on the board fits me. I go there."
+        if (!loopChanges) {
+            // Check remaining Corners
+            availableCorners.forEach(cand => {
+                const compatiblePieces = boardPieces.filter(p => 
+                    p.type === 'corner' && 
+                    !p.isComplete && 
+                    p.painted.every(col => cand.includes(col))
+                );
+
+                if (compatiblePieces.length === 1) {
+                    if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
+                }
+            });
+
+            // Check remaining Edges
+            availableEdges.forEach(cand => {
+                const compatiblePieces = boardPieces.filter(p => 
+                    p.type === 'edge' && 
+                    !p.isComplete && 
+                    p.painted.every(col => cand.includes(col))
+                );
+
+                if (compatiblePieces.length === 1) {
+                    if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
+                }
+            });
+        }
     }
     
     if(iteration > 1) updatePaletteCounts();
 }
 
-// Safely fills a piece, ensuring orientation is correct
-function safeFill(piece, candidateColors, allBoardPieces) {
-    let changed = false;
-    const missingColors = candidateColors.filter(c => !piece.painted.includes(c));
-    const emptyFaces = piece.faces.filter(f => f.color === null);
-
-    if (missingColors.length === 0) return false;
-
-    // CASE 1: EDGE (2 sides)
-    // If it's an edge, and we know the missing color, it simply goes in the empty slot.
-    // Edges don't have complex twisting issues (A-B is same piece as B-A).
-    if (piece.type === 'edge') {
-        if (emptyFaces.length === 1 && missingColors.length === 1) {
-            emptyFaces[0].mat.color.setHex(colors[missingColors[0]]);
-            emptyFaces[0].mat.needsUpdate = true;
-            return true;
+function fillPiece(p, candidateColors) {
+    let filledSomething = false;
+    const missing = candidateColors.filter(c => !p.painted.includes(c));
+    
+    p.faces.forEach(f => {
+        // Only fill if empty (Null) to protect manual input
+        if (f.color === null && missing.length > 0) {
+            const fill = missing.shift(); 
+            f.mat.color.setHex(colors[fill]);
+            f.mat.needsUpdate = true;
+            filledSomething = true;
         }
-    }
-
-    // CASE 2: CORNER (3 sides)
-    if (piece.type === 'corner') {
-        // Sub-case: 2 Colors Painted, 1 Missing
-        // If 2 are fixed, the 3rd is physically forced. Safe to fill.
-        if (emptyFaces.length === 1 && missingColors.length === 1) {
-            emptyFaces[0].mat.color.setHex(colors[missingColors[0]]);
-            emptyFaces[0].mat.needsUpdate = true;
-            return true;
-        }
-
-        // Sub-case: 1 Color Painted, 2 Missing (High Risk of twisting)
-        // We use Neighbor Logic to infer orientation
-        if (emptyFaces.length === 2 && missingColors.length === 2) {
-            
-            // Try to match an empty face to a neighbor
-            emptyFaces.forEach(face => {
-                if (face.color !== null) return; // Already filled
-
-                // Look at the normal of this empty face (e.g. Up)
-                // Find an Edge on this same face that is already painted
-                const neighborEdge = allBoardPieces.find(p => 
-                    p.type === 'edge' && 
-                    p.faces.some(f => f.color !== null && f.norm.equals(face.norm))
-                );
-
-                if (neighborEdge) {
-                    // We found a painted edge on the same face!
-                    // The color of that edge's face MUST match the corner's face color
-                    const matchingFace = neighborEdge.faces.find(f => f.norm.equals(face.norm));
-                    const edgeColor = matchingFace.color;
-
-                    // Is this edge color one of our missing candidate colors?
-                    if (missingColors.includes(edgeColor)) {
-                        // BINGO! We deduced this face's color from the neighbor.
-                        face.mat.color.setHex(colors[edgeColor]);
-                        face.mat.needsUpdate = true;
-                        
-                        // Remove from missing list so the loop continues correctly
-                        const idx = missingColors.indexOf(edgeColor);
-                        if(idx > -1) missingColors.splice(idx, 1);
-                        
-                        changed = true;
-                    }
-                }
-            });
-
-            // If we successfully filled one face using neighbors, 
-            // the last face is now trivial (1 empty, 1 missing) -> logic will catch it next loop.
-        }
-    }
-
-    return changed;
+    });
+    return filledSomething;
 }
 
 
