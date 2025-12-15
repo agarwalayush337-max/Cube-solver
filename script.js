@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – LOGICAL AUTOFILL EDITION
+   RUBIK'S CUBE SOLVER – RECURSIVE LOGICAL AUTOFILL
    ========================================================= */
 
 /* =======================
@@ -15,12 +15,12 @@ const colors = {
     Core: 0x202020 // Dark Grey (Internal/Empty)
 };
 
-// Standard Valid Pieces (Color Combinations)
-const VALID_CORNERS = [
+// All Physically Possible Pieces (Standard Color Scheme)
+const ALL_CORNERS = [
     ["U","R","F"], ["U","F","L"], ["U","L","B"], ["U","B","R"],
     ["D","F","R"], ["D","L","F"], ["D","B","L"], ["D","R","B"]
 ];
-const VALID_EDGES = [
+const ALL_EDGES = [
     ["U","R"], ["U","F"], ["U","L"], ["U","B"],
     ["D","R"], ["D","F"], ["D","L"], ["D","B"],
     ["F","R"], ["F","L"], ["B","L"], ["B","R"]
@@ -70,7 +70,7 @@ solverWorker.onmessage = (e) => {
     }
     if (d.type === "solution") {
         if (!d.solution || d.solution.startsWith("Error")) {
-            statusEl.innerText = "Unsolvable State! Check colors.";
+            statusEl.innerText = "Unsolvable! Check for duplicate colors.";
             statusEl.style.color = "red";
             return;
         }
@@ -171,14 +171,14 @@ function createCube() {
 }
 
 /* =======================
-   HELPERS: COLOR & GEOMETRY
+   HELPERS
 ======================= */
 function getColorKey(hex) {
     for (const k in colors) {
         if (k === "Core") continue;
         if (colors[k] === hex) return k;
     }
-    return null; // Empty
+    return null; 
 }
 
 function snapToGrid() {
@@ -191,14 +191,12 @@ function snapToGrid() {
         c.quaternion.setFromEuler(euler);
         c.updateMatrix();
         
-        // Update logical indices
         c.userData.ix = Math.round(c.position.x);
         c.userData.iy = Math.round(c.position.y);
         c.userData.iz = Math.round(c.position.z);
     });
 }
 
-// Get the actual material index (0-5) that corresponds to a visible face (Right, Left, etc)
 function getVisibleFaceMatIndex(cube, worldDir) {
     const localDir = worldDir.clone().applyQuaternion(cube.quaternion.clone().invert()).round();
     if (localDir.x === 1) return 0;
@@ -211,120 +209,113 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 }
 
 /* =======================
-   LOGICAL AUTOFILL ENGINE
+   RECURSIVE LOGICAL DEDUCTION (The Brain)
 ======================= */
 function runLogicalAutofill() {
-    let changed = false;
-    
-    // 1. Snapshot current board state
-    // We map each physical cubie to a list of colors currently painted on it
-    let boardPieces = []; 
-    
-    // Helper to identify exposed faces for a cubie at (x,y,z)
-    // Returns array of objects: { faceName: "U", mat: materialObject, colorKey: "W" or null }
-    const getExposedFaces = (c) => {
-        const x = Math.round(c.position.x);
-        const y = Math.round(c.position.y);
-        const z = Math.round(c.position.z);
-        const exposed = [];
-        
-        const check = (wx, wy, wz, faceName) => {
-            // If this side is facing out (e.g. x=1 for Right face)
-            if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
-                const norm = new THREE.Vector3(wx, wy, wz);
-                const matIdx = getVisibleFaceMatIndex(c, norm);
-                if (matIdx !== -1) {
-                    const mat = c.material[matIdx];
-                    const k = getColorKey(mat.color.getHex());
-                    exposed.push({ dir: faceName, mat: mat, color: k });
+    let loopChanges = true;
+    let iteration = 0;
+
+    // Loop until we can't deduce any more moves (Recursion via Loop)
+    while (loopChanges && iteration < 20) {
+        loopChanges = false;
+        iteration++;
+
+        // 1. Snapshot Board: List all 20 pieces and their current colors
+        let boardPieces = []; 
+
+        const getExposedFaces = (c) => {
+            const x = Math.round(c.position.x);
+            const y = Math.round(c.position.y);
+            const z = Math.round(c.position.z);
+            const exposed = [];
+            const check = (wx, wy, wz, faceName) => {
+                if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
+                    const norm = new THREE.Vector3(wx, wy, wz);
+                    const matIdx = getVisibleFaceMatIndex(c, norm);
+                    if (matIdx !== -1) {
+                        const mat = c.material[matIdx];
+                        const k = getColorKey(mat.color.getHex());
+                        exposed.push({ dir: faceName, mat: mat, color: k });
+                    }
                 }
-            }
+            };
+            check(0,1,0,"U"); check(0,-1,0,"D");
+            check(1,0,0,"R"); check(-1,0,0,"L");
+            check(0,0,1,"F"); check(0,0,-1,"B");
+            return exposed;
         };
 
-        check(0,1,0,"U"); check(0,-1,0,"D");
-        check(1,0,0,"R"); check(-1,0,0,"L");
-        check(0,0,1,"F"); check(0,0,-1,"B");
-        return exposed;
-    };
-
-    // Build Board State
-    cubes.forEach(c => {
-        if(c.userData.isCenter) return;
-        const faces = getExposedFaces(c);
-        if(faces.length === 0) return; // Internal?
-        
-        const paintedColors = faces.map(f => f.color).filter(c => c !== null);
-        boardPieces.push({
-            type: faces.length === 3 ? 'corner' : 'edge',
-            faces: faces,
-            painted: paintedColors,
-            isComplete: paintedColors.length === faces.length
-        });
-    });
-
-    // 2. Identify "Taken" Pieces
-    // If a piece is fully painted, we remove it from the list of candidates
-    let availableCorners = [...VALID_CORNERS];
-    let availableEdges = [...VALID_EDGES];
-
-    boardPieces.forEach(p => {
-        if (p.isComplete) {
-            // Find which standard piece matches these colors
-            const set = new Set(p.painted);
-            if(p.type === 'corner') {
-                // Remove matching corner from available
-                const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
-                if(idx !== -1) availableCorners.splice(idx, 1);
-            } else {
-                // Remove matching edge
-                const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
-                if(idx !== -1) availableEdges.splice(idx, 1);
-            }
-        }
-    });
-
-    // 3. Deduce "Incomplete" Pieces
-    boardPieces.forEach(p => {
-        if (p.isComplete) return; // Already done
-        if (p.painted.length === 0) return; // No info yet
-
-        let candidates = [];
-        if (p.type === 'corner') {
-            candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
-        } else {
-            candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
-        }
-
-        // MAGIC: If only 1 candidate remains, fill it!
-        if (candidates.length === 1) {
-            const match = candidates[0];
-            // Determine which colors are missing
-            const missing = match.filter(c => !p.painted.includes(c));
+        // Gather all 20 movable pieces
+        cubes.forEach(c => {
+            if(c.userData.isCenter) return;
+            const faces = getExposedFaces(c);
+            if(faces.length === 0) return;
             
-            // Fill the empty faces
-            p.faces.forEach(f => {
-                if (f.color === null && missing.length > 0) {
-                    // We take the first missing color. 
-                    // (For Corners with 1 paint, we have 2 missing. Order doesn't matter for valid solver state usually, 
-                    // but visually we might swap them. 
-                    // However, standard corner coloring is unique regardless of permutation for solving logic,
-                    // BUT for visual, we might paint WRG as WGR.
-                    // This logic assumes we just need to fill the stickers for the solver string.)
-                    
-                    const fill = missing.shift(); 
-                    f.mat.color.setHex(colors[fill]);
-                    f.mat.needsUpdate = true;
-                    changed = true;
-                }
+            const paintedColors = faces.map(f => f.color).filter(c => c !== null);
+            boardPieces.push({
+                obj: c, // Reference for later
+                type: faces.length === 3 ? 'corner' : 'edge',
+                faces: faces,
+                painted: paintedColors,
+                isComplete: paintedColors.length === faces.length
             });
-        }
-    });
+        });
 
-    if(changed) {
+        // 2. Identify Candidates (Inventory Management)
+        // Start with full inventory
+        let availableCorners = [...ALL_CORNERS];
+        let availableEdges = [...ALL_EDGES];
+
+        // Remove pieces that are ALREADY placed on the board (Completed ones)
+        boardPieces.forEach(p => {
+            if (p.isComplete) {
+                const set = new Set(p.painted);
+                if(p.type === 'corner') {
+                    const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
+                    if(idx !== -1) availableCorners.splice(idx, 1);
+                } else {
+                    const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
+                    if(idx !== -1) availableEdges.splice(idx, 1);
+                }
+            }
+        });
+
+        // 3. Deduce Unknowns
+        boardPieces.forEach(p => {
+            if (p.isComplete) return; // Skip done
+            if (p.painted.length === 0) return; // Skip empty (too many possibilities)
+
+            // Find all possible candidates for THIS piece based on what we've painted so far
+            let candidates = [];
+            if (p.type === 'corner') {
+                candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
+            } else {
+                candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
+            }
+
+            // THE MAGIC: If only ONE candidate fits, we found it!
+            if (candidates.length === 1) {
+                const match = candidates[0];
+                const missing = match.filter(c => !p.painted.includes(c));
+                
+                // Fill the empty faces
+                p.faces.forEach(f => {
+                    // CRITICAL CHECK: Only fill if it is NULL (Empty/Grey)
+                    // This prevents overwriting user manual inputs
+                    if (f.color === null && missing.length > 0) {
+                        const fill = missing.shift(); 
+                        f.mat.color.setHex(colors[fill]);
+                        f.mat.needsUpdate = true;
+                        loopChanges = true; // We changed something, so we must loop again!
+                    }
+                });
+            }
+        });
+    }
+
+    if(iteration > 1) {
+        statusEl.innerText = "Auto-filled logical pieces!";
         updatePaletteCounts();
-        // Recurse? Maybe, but one pass per click is usually safe enough.
-        statusEl.innerText = "Auto-filled logical piece!";
-        setTimeout(() => statusEl.innerText = "Ready...", 1500);
     }
 }
 
@@ -352,10 +343,11 @@ function handlePaint(clientX, clientY) {
         const matIndex = hit.face.materialIndex;
         const mat = obj.material[matIndex];
         
+        // Manual Paint
         mat.color.setHex(colors[paintColor]);
         mat.needsUpdate = true;
         
-        // TRIGGER LOGIC
+        // Trigger Recursive Logic
         runLogicalAutofill();
         updatePaletteCounts();
     }
