@@ -302,6 +302,49 @@ function parseSolution(solStr) {
     solutionMoves = solStr.trim().split(/\s+/);
     moveIndex = 0;
 }
+// ==========================================
+// PLAYBACK CONTROLS (MISSING – FIX)
+// ==========================================
+let playInterval = null;
+
+function nextMove() {
+    if (moveIndex < solutionMoves.length) {
+        rotateFace(solutionMoves[moveIndex]);
+        document.getElementById('status').innerHTML =
+            `Move ${moveIndex + 1}/${solutionMoves.length}: 
+             <b style="color:#fff;font-size:24px">${solutionMoves[moveIndex]}</b>`;
+        moveIndex++;
+    } else {
+        document.getElementById('status').innerText = "Cube Solved!";
+        clearInterval(playInterval);
+        playInterval = null;
+        const btn = document.getElementById('playPauseBtn');
+        if (btn) btn.innerText = "PLAY";
+    }
+}
+
+function togglePlay() {
+    const btn = document.getElementById('playPauseBtn');
+
+    if (playInterval) {
+        clearInterval(playInterval);
+        playInterval = null;
+        if (btn) btn.innerText = "PLAY";
+    } else {
+        if (!solutionMoves.length) return;
+        if (btn) btn.innerText = "PAUSE";
+        playInterval = setInterval(() => {
+            if (!isAnimating) {
+                nextMove();
+            }
+        }, 600);
+    }
+}
+
+function prevMove() {
+    // Optional: implement reverse moves later
+}
+
 
 // ==========================================
 // 6. STATE CAPTURE (UNCHANGED)
