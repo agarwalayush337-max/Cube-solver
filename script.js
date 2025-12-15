@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – FINAL FIXED script.js
+   RUBIK'S CUBE SOLVER – SCRAMBLE FIX FINAL VERSION
    ========================================================= */
 
 /* =======================
@@ -12,11 +12,12 @@ const colors = {
     D: 0xffd500, // Yellow
     L: 0xff5800, // Orange
     B: 0x0051ba, // Blue
-    Core: 0x202020 // Dark Grey (Empty)
+    Core: 0x202020 // Dark Grey (Internal)
 };
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
-const PLAY_SPEED = 1000; // 1 Second per move
+const PLAY_SPEED = 1000; // 1 Second per move for playback
+const SCRAMBLE_SPEED = 100; // 100ms per move for scramble (fast but safe)
 
 /* =======================
    GLOBAL STATE
@@ -98,10 +99,10 @@ function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111);
 
-    // FIXED: Camera moved back (8 instead of 6) to make cube smaller
-    // Positioned at (6,5,8) for a nice "standard" isometric look
-    camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(6, 5, 9); 
+    // FIXED: Camera moved further back (Z=12) to reduce size
+    // Angle set to create a nice isometric view
+    camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(8, 7, 12); 
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -114,8 +115,7 @@ function init() {
     const dl = new THREE.DirectionalLight(0xffffff, 1);
     dl.position.set(10, 20, 10);
     scene.add(dl);
-    
-    const bl = new THREE.DirectionalLight(0xffffff, 0.4);
+    const bl = new THREE.DirectionalLight(0xffffff, 0.5);
     bl.position.set(-10, -10, -10);
     scene.add(bl);
 
@@ -127,15 +127,14 @@ function init() {
 
     createCube();
 
-    // Reset pivot rotation
-    pivotGroup.rotation.set(0, 0, 0);
+    // Initial Rotation: slightly rotated so it doesn't look flat/diagonal
+    pivotGroup.rotation.x = 0;
+    pivotGroup.rotation.y = -0.5;
 
-    // Mouse Events
+    // Events
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
     document.addEventListener("mouseup", onInputEnd);
-
-    // Touch Events
     document.addEventListener("touchstart", onInputStart, { passive: false });
     document.addEventListener("touchmove", onInputMove, { passive: false });
     document.addEventListener("touchend", onInputEnd);
@@ -144,10 +143,9 @@ function init() {
 }
 
 /* =======================
-   CUBE LOGIC
+   CUBE GENERATION
 ======================= */
 function createCube() {
-    // Clean up old
     while(pivotGroup.children.length > 0){ 
         pivotGroup.remove(pivotGroup.children[0]); 
     }
@@ -159,22 +157,19 @@ function createCube() {
         for (let y = -1; y <= 1; y++)
             for (let z = -1; z <= 1; z++) {
                 
-                // Materials: Right, Left, Top, Bottom, Front, Back
                 const mats = [
-                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })
+                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }), // R
+                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }), // L
+                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }), // U
+                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }), // D
+                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }), // F
+                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })  // B
                 ];
 
                 const cube = new THREE.Mesh(geo, mats);
-                
-                // Set initial position
                 cube.position.set(x, y, z);
                 
-                // Store logical indices (initially same as position)
+                // Initialize Logical Indices
                 cube.userData = { 
                     ix: x, iy: y, iz: z, 
                     isCenter: (Math.abs(x) + Math.abs(y) + Math.abs(z)) === 1
@@ -185,16 +180,19 @@ function createCube() {
             }
 }
 
-// CRITICAL FIX: The "Anti-Explosion" Function
-// This forces every cube to snap to exactly -1, 0, or 1
+/* =======================
+   CRITICAL: GRID SNAPPING
+======================= */
 function snapToGrid() {
     cubes.forEach(c => {
-        // 1. Snap Position
-        c.position.x = Math.round(c.position.x);
-        c.position.y = Math.round(c.position.y);
-        c.position.z = Math.round(c.position.z);
+        // 1. Force Position to Integer
+        c.position.set(
+            Math.round(c.position.x),
+            Math.round(c.position.y),
+            Math.round(c.position.z)
+        );
 
-        // 2. Snap Rotation (nearest 90 degrees)
+        // 2. Force Rotation to 90-degree steps
         const euler = new THREE.Euler().setFromQuaternion(c.quaternion);
         euler.x = Math.round(euler.x / (Math.PI/2)) * (Math.PI/2);
         euler.y = Math.round(euler.y / (Math.PI/2)) * (Math.PI/2);
@@ -203,8 +201,7 @@ function snapToGrid() {
         
         c.updateMatrix();
 
-        // 3. Update Logical Indices (userData) to match new position
-        // This ensures the NEXT rotation grabs the correct pieces
+        // 3. Update Logical Indices based on the new Snapped Position
         c.userData.ix = Math.round(c.position.x);
         c.userData.iy = Math.round(c.position.y);
         c.userData.iz = Math.round(c.position.z);
@@ -212,10 +209,11 @@ function snapToGrid() {
 }
 
 /* =======================
-   ROTATION ENGINE
+   ROTATION ENGINE (CALLBACK BASED)
 ======================= */
-function rotateFace(move, reverse=false) {
-    if (isAnimating && !move) return;
+// Added 'onComplete' callback to ensure sync
+function rotateFace(move, reverse=false, onComplete=null) {
+    if (isAnimating && !onComplete) return; // Block user clicks if animating
     isAnimating = true;
 
     let face = move[0];
@@ -227,63 +225,87 @@ function rotateFace(move, reverse=false) {
     let axis = "y"; 
     let group = [];
 
-    // Filter cubes based on CURRENT logical indices
+    // SELECT CUBES based on current logical positions
     cubes.forEach(c => {
         const { ix, iy, iz } = c.userData;
         
         if(face==="U" && iy === 1) { axis="y"; group.push(c); }
         if(face==="D" && iy === -1){ axis="y"; dir *= -1; group.push(c); }
-        
         if(face==="R" && ix === 1) { axis="x"; group.push(c); }
         if(face==="L" && ix === -1){ axis="x"; dir *= -1; group.push(c); }
-        
         if(face==="F" && iz === 1) { axis="z"; group.push(c); }
         if(face==="B" && iz === -1){ axis="z"; dir *= -1; group.push(c); }
     });
 
-    // Create a temporary pivot at center
     const pivot = new THREE.Object3D();
     pivot.rotation.set(0,0,0);
     pivotGroup.add(pivot);
 
-    // Attach chosen cubes to pivot
-    group.forEach(c => {
-        pivot.attach(c);
-    });
+    group.forEach(c => pivot.attach(c));
 
     const targetAngle = (twice ? Math.PI : Math.PI/2) * dir;
-    const duration = PLAY_SPEED === 1000 ? 500 : 120; // Fast scramble, slow play
+    
+    // Scramble is fast, Playback is slow
+    const speed = onComplete ? SCRAMBLE_SPEED : PLAY_SPEED; 
     const start = Date.now();
 
     function step(){
         const now = Date.now();
-        let p = (now - start) / duration;
+        let p = (now - start) / speed;
         if(p > 1) p = 1;
         
-        // Smooth easing
         const ease = p * (2 - p);
         pivot.rotation[axis] = targetAngle * ease;
 
         if(p < 1) {
             requestAnimationFrame(step);
         } else {
-            // End of animation
+            // FINISH
             pivot.rotation[axis] = targetAngle;
             pivot.updateMatrixWorld();
 
-            // Detach from pivot, attach back to main group
-            group.forEach(c => {
-                pivotGroup.attach(c);
-            });
+            group.forEach(c => pivotGroup.attach(c));
             pivotGroup.remove(pivot);
             
-            // KEY FIX: Snap everything to grid immediately
+            // KEY: Snap to grid BEFORE allowing next move
             snapToGrid();
             
             isAnimating = false;
+            if(onComplete) onComplete();
         }
     }
     step();
+}
+
+/* =======================
+   SCRAMBLE (RECURSIVE QUEUE)
+======================= */
+function scrambleCube() {
+    if (isAnimating) return;
+    
+    // Reset state first to ensure clean slate? No, scramble from current.
+    statusEl.innerText = "Scrambling...";
+    
+    // Generate 20 random moves
+    const moves = Array.from({length: 20}, () => 
+        SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]
+    );
+
+    let i = 0;
+    
+    // Recursive function to ensure Move 2 waits for Move 1
+    function nextMove() {
+        if (i >= moves.length) {
+            statusEl.innerText = "Ready to Solve";
+            return;
+        }
+        
+        const move = moves[i++];
+        // Call rotateFace and pass 'nextMove' as callback
+        rotateFace(move, false, nextMove);
+    }
+    
+    nextMove(); // Start the chain
 }
 
 /* =======================
@@ -297,9 +319,7 @@ function updatePaletteCounts() {
         const color = s.dataset.color;
         const span = s.querySelector(".count");
         if (span) span.innerText = counts[color];
-        // Dim if completed
         s.style.opacity = (counts[color] >= 9) ? 0.3 : 1;
-        // Highlight active
         if(color === paintColor) s.style.opacity = 1;
     });
 }
@@ -308,7 +328,7 @@ function selectColor(el, c) {
     paintColor = c;
     document.querySelectorAll(".swatch").forEach(s => s.classList.remove("selected"));
     el.classList.add("selected");
-    updatePaletteCounts(); // Refresh opacity
+    updatePaletteCounts();
 }
 
 function clearCube() {
@@ -327,6 +347,8 @@ function clearCube() {
     
     statusEl.innerText = "Cube Cleared";
     solutionTextEl.innerText = "";
+    document.getElementById("action-controls").style.display = "flex";
+    document.getElementById("playback-controls").style.display = "none";
     updatePaletteCounts();
 }
 
@@ -361,13 +383,12 @@ function handlePaint(clientX, clientY) {
 }
 
 /* =======================
-   SMART AUTOFILL (FIXED)
+   SMART AUTOFILL (IMPROVED)
 ======================= */
 function smartAutoFill() {
     const state = getCubeStateString();
     const counts = countColors(state);
     
-    // 1. Calculate missing stickers
     let missingColors = [];
     for(let k in counts) {
         if(counts[k] < 9) {
@@ -375,65 +396,36 @@ function smartAutoFill() {
         }
     }
     
-    // Safety: Only autofill if 5 or fewer stickers remain
-    if (missingColors.length === 0 || missingColors.length > 6) return;
+    if (missingColors.length === 0) return;
 
-    // 2. Find empty visible stickers
+    // Find visible empty stickers
     let emptyStickers = [];
     
-    // Iterate all cubes
     cubes.forEach(c => {
-        c.material.forEach(m => {
-            // Check if this material is currently "Core" (Grey)
-            if(m.color.getHex() === colors.Core) {
-                // Check if this face is actually visible? 
-                // We assume any remaining Core material on a non-center piece 
-                // that hasn't been painted needs painting.
-                // However, internal faces (between cubes) are also Core.
-                // We must filtering for faces that are on the OUTSIDE of the cube.
-                
-                // Get normal of this face in world space? Too complex.
-                // Simple check: Is this face index valid for the current position?
-                // But rotation mixes up indices.
-                // EASIER: Just assume user painted all valid faces except the last few.
-                
-                // Actually, simply filling ALL remaining Core materials might paint internal faces.
-                // That is fine visually, as they are hidden.
-                if(!c.userData.isCenter) emptyStickers.push(m);
-            }
-        });
-    });
-    
-    // Note: This gathers ALL internal faces too (approx 54 internal faces).
-    // We only want the outer ones.
-    // Fixed Logic: Only check faces that align with the grid limits (-1 or 1)
-    
-    emptyStickers = []; // Reset
-    
-    cubes.forEach(c => {
+        // Use ROUNDED positions to check faces
         const x = Math.round(c.position.x);
         const y = Math.round(c.position.y);
         const z = Math.round(c.position.z);
         
-        // Right face (Mat 0) is visible if x=1
-        if(x===1 && c.material[0].color.getHex() === colors.Core) emptyStickers.push(c.material[0]);
-        // Left face (Mat 1) is visible if x=-1
-        if(x===-1 && c.material[1].color.getHex() === colors.Core) emptyStickers.push(c.material[1]);
-        
-        // Top (Mat 2) y=1
-        if(y===1 && c.material[2].color.getHex() === colors.Core) emptyStickers.push(c.material[2]);
-        // Bottom (Mat 3) y=-1
-        if(y===-1 && c.material[3].color.getHex() === colors.Core) emptyStickers.push(c.material[3]);
-        
-        // Front (Mat 4) z=1
-        if(z===1 && c.material[4].color.getHex() === colors.Core) emptyStickers.push(c.material[4]);
-        // Back (Mat 5) z=-1
-        if(z===-1 && c.material[5].color.getHex() === colors.Core) emptyStickers.push(c.material[5]);
+        // Check only exposed faces
+        const check = (faceVal, targetVal, matIdx) => {
+            if(faceVal === targetVal && c.material[matIdx].color.getHex() === colors.Core) {
+                emptyStickers.push(c.material[matIdx]);
+            }
+        };
+
+        check(x, 1, 0);  // Right
+        check(x, -1, 1); // Left
+        check(y, 1, 2);  // Up
+        check(y, -1, 3); // Down
+        check(z, 1, 4);  // Front
+        check(z, -1, 5); // Back
     });
 
-    // 3. Fill if counts match
-    if (emptyStickers.length === missingColors.length) {
-        statusEl.innerText = "Auto-filling last pieces...";
+    // Only auto-fill if the number of empty spots matches missing colors EXACTLY
+    // (and we aren't trying to fill the whole cube from scratch, limit to last 10)
+    if (emptyStickers.length === missingColors.length && missingColors.length <= 12) {
+        statusEl.innerText = "Auto-filling...";
         emptyStickers.forEach((mat, i) => {
             mat.color.setHex(colors[missingColors[i]]);
             mat.needsUpdate = true;
@@ -443,9 +435,11 @@ function smartAutoFill() {
 }
 
 /* =======================
-   INPUT HANDLING (DRAG VS CLICK)
+   INPUT: DRAG & CLICK
 ======================= */
 function onInputStart(e) {
+    // isAnimating check removed to allow stopping play, 
+    // but drag logic should check it
     isMouseDown = true;
     isDragging = false;
     
@@ -465,7 +459,6 @@ function onInputMove(e) {
     const dx = cx - lastMouse.x;
     const dy = cy - lastMouse.y;
     
-    // Threshold to detect drag vs click
     if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) {
         isDragging = true;
     }
@@ -481,7 +474,6 @@ function onInputEnd(e) {
     isMouseDown = false;
     
     if (!isDragging) {
-        // Handle Click/Tap
         let cx, cy;
         if(e.changedTouches && e.changedTouches.length > 0) {
             cx = e.changedTouches[0].clientX;
@@ -515,15 +507,27 @@ function countColors(state) {
 function getCubeStateString() {
     let state = "";
     
-    const find = (x,y,z) => cubes.find(c => Math.round(c.position.x)===x && Math.round(c.position.y)===y && Math.round(c.position.z)===z);
+    // Lookup by ROUNDED position
+    const find = (x,y,z) => cubes.find(c => 
+        Math.round(c.position.x)===x && 
+        Math.round(c.position.y)===y && 
+        Math.round(c.position.z)===z
+    );
 
+    // Standard Face Order for Kociemba Solver
     const faces = [
-        [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]], // U
-        [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]], // R
-        [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]], // F
-        [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]], // D
-        [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]], // L
-        [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]]  // B
+        // U: Top Face
+        [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]], 
+        // R: Right Face
+        [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]],
+        // F: Front Face
+        [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]],
+        // D: Down Face
+        [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]],
+        // L: Left Face
+        [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]],
+        // B: Back Face
+        [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]]
     ];
     const matIndices = [2, 0, 4, 3, 1, 5];
 
@@ -542,7 +546,7 @@ function getCubeStateString() {
 }
 
 /* =======================
-   SOLVE & SCRAMBLE
+   SOLVE & CONTROLS
 ======================= */
 function solveCube() {
     if (!engineReady) return alert("Engine loading...");
@@ -567,30 +571,6 @@ function solveCube() {
     solverWorker.postMessage({ type:"solve", cube: cubeStr });
 }
 
-function scrambleCube() {
-    if (isAnimating) return;
-    
-    let i = 0;
-    const scramble = Array.from({length: 20},
-        () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]
-    );
-    
-    statusEl.innerText = "Scrambling...";
-
-    function apply() {
-        if (i >= scramble.length) {
-            statusEl.innerText = "Ready to Solve";
-            return;
-        }
-        rotateFace(scramble[i++]);
-        setTimeout(apply, 150);
-    }
-    apply();
-}
-
-/* =======================
-   PLAYBACK CONTROLS
-======================= */
 function updateStepStatus() {
     statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length}`;
 }
