@@ -4,6 +4,7 @@
 * {
   box-sizing: border-box;
   font-family: Arial, Helvetica, sans-serif;
+  user-select: none; /* Prevent text selection on touch */
 }
 
 body {
@@ -11,6 +12,7 @@ body {
   background: radial-gradient(circle at top, #222, #000);
   color: #fff;
   overflow: hidden;
+  touch-action: none; /* Prevent browser zooming/scrolling */
 }
 
 /* ==========================
@@ -22,6 +24,7 @@ body {
   width: 100%;
   text-align: center;
   z-index: 10;
+  pointer-events: none; /* Let clicks pass through gaps */
 }
 
 #palette {
@@ -30,6 +33,19 @@ body {
   padding: 10px 14px;
   background: rgba(0,0,0,0.6);
   border-radius: 30px;
+  pointer-events: auto;
+}
+
+#tool-row {
+    margin-top: 8px;
+    pointer-events: auto;
+}
+
+.tool-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    background: #444;
+    margin: 0 4px;
 }
 
 /* ==========================
@@ -62,15 +78,17 @@ body {
 .blue { background: #0051ba; }
 
 /* ==========================
-   COLOR COUNTS
+   COLOR COUNTS (CENTERED)
 ========================== */
 .swatch .count {
   position: absolute;
-  bottom: 4px;
-  right: 6px;
-  font-size: 12px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 16px;
   font-weight: bold;
   color: #000;
+  text-shadow: 0 0 2px rgba(255,255,255,0.5);
   pointer-events: none;
 }
 
@@ -81,6 +99,7 @@ body {
   margin-top: 8px;
   font-size: 13px;
   color: #aaa;
+  text-shadow: 0 1px 2px #000;
 }
 
 /* ==========================
@@ -96,53 +115,60 @@ body {
 ========================== */
 #status {
   position: absolute;
-  bottom: 120px;
+  bottom: 140px;
   width: 100%;
   text-align: center;
   font-size: 18px;
   font-weight: bold;
+  text-shadow: 0 2px 4px #000;
+  pointer-events: none;
 }
 
 #solutionText {
   position: absolute;
-  bottom: 90px;
+  bottom: 100px;
   width: 100%;
   text-align: center;
-  font-size: 14px;
-  color: #ccc;
+  font-size: 16px;
+  color: #0f0;
   padding: 0 10px;
+  font-family: monospace;
+  pointer-events: none;
 }
 
 /* ==========================
    CONTROLS
 ========================== */
 #action-controls,
-#playback-controls,
-#reset-container {
+#playback-controls {
   position: absolute;
-  bottom: 20px;
+  bottom: 30px;
   width: 100%;
   display: flex;
   justify-content: center;
-  gap: 12px;
+  gap: 15px;
+  z-index: 20;
 }
 
 #playback-controls {
   display: none;
 }
 
-#reset-container {
-  bottom: 60px;
-}
-
 button {
-  padding: 10px 16px;
+  padding: 12px 24px;
   border-radius: 8px;
   border: none;
   cursor: pointer;
   background: #333;
   color: #fff;
   font-size: 14px;
+  font-weight: bold;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  transition: background 0.2s;
+}
+
+button:active {
+  transform: translateY(1px);
 }
 
 button:hover {
@@ -155,13 +181,4 @@ button.primary {
 
 button.primary:hover {
   background: #00cc77;
-}
-
-#resetBtn {
-  display: none;
-  background: #aa3333;
-}
-
-#resetBtn:hover {
-  background: #cc4444;
 }
