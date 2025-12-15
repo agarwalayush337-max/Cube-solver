@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – UPDATED script.js
+   RUBIK'S CUBE SOLVER – FIXED & OPTIMIZED script.js
    ========================================================= */
 
 /* =======================
@@ -12,7 +12,7 @@ const colors = {
     D: 0xffd500,
     L: 0xff5800,
     B: 0x0051ba,
-    Core: 0x202020 // Slightly lighter core for visibility
+    Core: 0x202020 // Dark grey for internal parts
 };
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
@@ -37,7 +37,7 @@ let isDragging = false;
 let lastMouse = { x: 0, y: 0 };
 
 /* =======================
-   WORKER
+   WORKER INT
 ======================= */
 const statusEl = document.getElementById("status");
 const solutionTextEl = document.getElementById("solutionText");
@@ -58,14 +58,12 @@ solverWorker.onmessage = (e) => {
     }
 
     if (d.type === "solution") {
-        // Basic check for error strings from solver
         if (!d.solution || d.solution.startsWith("Error")) {
             statusEl.innerText = "Unsolvable State! Check colors.";
             statusEl.style.color = "red";
             return;
         }
 
-        // Check if solution is empty (already solved)
         if (d.solution.trim() === "") {
              statusEl.innerText = "Cube is already solved!";
              statusEl.style.color = "#00ff88";
@@ -73,14 +71,11 @@ solverWorker.onmessage = (e) => {
         }
 
         solutionMoves = d.solution.trim().split(/\s+/);
-        
-        // Filter out double spaces or empty strings
         solutionMoves = solutionMoves.filter(m => m.length > 0);
 
         moveIndex = 0;
         solutionTextEl.innerText = d.solution;
         
-        // Switch UI
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
         
@@ -104,8 +99,9 @@ function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111);
 
+    // Standard Isometric View (Corner view)
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(5, 6, 9); // Better initial angle
+    camera.position.set(5, 5, 7); 
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -118,7 +114,6 @@ function init() {
     dl.position.set(10, 20, 10);
     scene.add(dl);
     
-    // Back light to see shadows
     const bl = new THREE.DirectionalLight(0xffffff, 0.3);
     bl.position.set(-10, -10, -10);
     scene.add(bl);
@@ -130,17 +125,16 @@ function init() {
     scene.add(pivotGroup);
 
     createCube();
-    
-    // Initial Rotation for view
-    pivotGroup.rotation.y = -Math.PI / 4;
-    pivotGroup.rotation.x = Math.PI / 6;
+
+    // No initial rotation on pivotGroup so it looks straight
+    pivotGroup.rotation.set(0, 0, 0);
 
     // Mouse Events
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
     document.addEventListener("mouseup", onInputEnd);
 
-    // Touch Events (Mobile)
+    // Touch Events
     document.addEventListener("touchstart", onInputStart, { passive: false });
     document.addEventListener("touchmove", onInputMove, { passive: false });
     document.addEventListener("touchend", onInputEnd);
@@ -149,34 +143,9 @@ function init() {
 }
 
 /* =======================
-   NUMBER TEXTURE
-======================= */
-function createNumberTexture(num) {
-    if(num === 9) return null; // Don't show number if completed
-    
-    const size = 64;
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext("2d");
-
-    // ctx.fillStyle = "rgba(0,0,0,0.5)";
-    // ctx.fillRect(0,0,size,size);
-
-    ctx.fillStyle = "black";
-    ctx.font = "bold 40px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(num, size / 2, size / 2);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    return tex;
-}
-
-/* =======================
-   CUBE CREATION
+   CUBE LOGIC
 ======================= */
 function createCube() {
-    // Clear existing
     while(pivotGroup.children.length > 0){ 
         pivotGroup.remove(pivotGroup.children[0]); 
     }
@@ -188,7 +157,6 @@ function createCube() {
         for (let y = -1; y <= 1; y++)
             for (let z = -1; z <= 1; z++) {
                 
-                // Materials: Right, Left, Top, Bottom, Front, Back
                 const mats = [
                     new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }),
                     new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }),
@@ -201,7 +169,6 @@ function createCube() {
                 const cube = new THREE.Mesh(geo, mats);
                 cube.position.set(x, y, z);
                 
-                // CRITICAL: Store logical indices separately from position
                 cube.userData = { 
                     ix: x, iy: y, iz: z, 
                     isCenter: (Math.abs(x) + Math.abs(y) + Math.abs(z)) === 1
@@ -212,29 +179,18 @@ function createCube() {
             }
 }
 
-/* =======================
-   STATE UPDATER (FIX #1)
-======================= */
-// After any rotation, we must update userData.ix/iy/iz based on new world positions
-/* =======================
-   STATE UPDATER (FIXED)
-======================= */
+// FIX: Snap logical indices based on LOCAL position
 function updateCubeIndices() {
     cubes.forEach(c => {
-        // 1. Get the world position
-        const worldPos = new THREE.Vector3();
-        c.getWorldPosition(worldPos);
-
-        // 2. Snap to nearest integer (-1, 0, 1)
-        c.userData.ix = Math.round(worldPos.x);
-        c.userData.iy = Math.round(worldPos.y);
-        c.userData.iz = Math.round(worldPos.z);
-
-        // 3. Reset local position to perfectly match the logical index
-        // This prevents floating point drift (e.g. 0.99999 -> 1.0)
+        // We use local position because pivotGroup is the container
+        c.userData.ix = Math.round(c.position.x);
+        c.userData.iy = Math.round(c.position.y);
+        c.userData.iz = Math.round(c.position.z);
+        
+        // Hard snap physics to logic to prevent drift
         c.position.set(c.userData.ix, c.userData.iy, c.userData.iz);
         
-        // 4. Reset rotation to nearest 90 degrees to keep it clean
+        // Snap rotations to nearest 90 deg
         c.rotation.x = Math.round(c.rotation.x / (Math.PI/2)) * (Math.PI/2);
         c.rotation.y = Math.round(c.rotation.y / (Math.PI/2)) * (Math.PI/2);
         c.rotation.z = Math.round(c.rotation.z / (Math.PI/2)) * (Math.PI/2);
@@ -242,6 +198,80 @@ function updateCubeIndices() {
         c.updateMatrix();
     });
 }
+
+/* =======================
+   ROTATION ENGINE (FIXED)
+======================= */
+function rotateFace(move, reverse=false) {
+    if (isAnimating && !move) return;
+    isAnimating = true;
+
+    let face = move[0];
+    let prime = move.includes("'");
+    let twice = move.includes("2");
+    if (reverse) prime = !prime;
+
+    let dir = prime ? 1 : -1;
+    let axis = "y"; // default
+    let group = [];
+
+    // Select cubes based on logical indices
+    cubes.forEach(c => {
+        const { ix, iy, iz } = c.userData;
+        
+        if(face==="R" && ix === 1) { axis="x"; group.push(c); }
+        if(face==="L" && ix === -1){ axis="x"; dir *= -1; group.push(c); }
+        
+        if(face==="U" && iy === 1) { axis="y"; group.push(c); }
+        if(face==="D" && iy === -1){ axis="y"; dir *= -1; group.push(c); }
+        
+        if(face==="F" && iz === 1) { axis="z"; group.push(c); }
+        if(face==="B" && iz === -1){ axis="z"; dir *= -1; group.push(c); }
+    });
+
+    // Create pivot attached to pivotGroup (so it rotates with the puzzle)
+    const pivot = new THREE.Object3D();
+    pivot.rotation.set(0,0,0);
+    pivotGroup.add(pivot);
+
+    // Attach selected cubes to pivot
+    group.forEach(c => {
+        pivot.attach(c);
+    });
+
+    const targetAngle = (twice ? Math.PI : Math.PI/2) * dir;
+    const duration = PLAY_SPEED === 1000 ? 500 : 120; // 500ms for manual solve, 120 for scramble
+    const start = Date.now();
+
+    function step(){
+        const now = Date.now();
+        let p = (now - start) / duration;
+        if(p > 1) p = 1;
+        
+        const ease = p * (2 - p); // Ease-out
+        pivot.rotation[axis] = targetAngle * ease;
+
+        if(p < 1) {
+            requestAnimationFrame(step);
+        } else {
+            pivot.rotation[axis] = targetAngle; // Finalize
+            pivot.updateMatrixWorld(); // Update transform
+
+            // Re-attach to main group
+            group.forEach(c => {
+                pivotGroup.attach(c);
+            });
+            pivotGroup.remove(pivot);
+            
+            // KEY FIX: Update indices immediately
+            updateCubeIndices();
+            
+            isAnimating = false;
+        }
+    }
+    step();
+}
+
 /* =======================
    PALETTE & PAINT
 ======================= */
@@ -253,8 +283,6 @@ function updatePaletteCounts() {
         const color = s.dataset.color;
         const span = s.querySelector(".count");
         if (span) span.innerText = counts[color];
-        
-        // Visual cue: fade out if full
         if(counts[color] >= 9) s.style.opacity = 0.5;
         else s.style.opacity = 1;
     });
@@ -270,55 +298,21 @@ function clearCube() {
     if(isAnimating) return;
     if(!confirm("Clear all colors (except centers)?")) return;
 
+    // Reset to "Core" color except centers
     cubes.forEach(c => {
         if(!c.userData.isCenter) {
-            c.material.forEach(m => {
-                // If it's not core color (internal face), reset it
-                // We identify internal faces by checking if they were originally core
-                // But simplified: Just set visible faces to Core
-                // We need to preserve the "Core" material for faces that are naturally internal
-                // Actually, simplest is to reset the whole cube geometry or just paint black.
-                
-                // Better approach:
-                // Re-create the cube to be safe and clean
-            });
-        }
-    });
-    
-    // Simplest Clean: Re-init
-    createCube();
-    // Paint centers
-    // Actually, createCube initializes solved.
-    // We want initialized BLANK.
-    cubes.forEach(c => {
-         c.material.forEach((m, i) => {
-             // Logic: If x=1 (Right face), material index 0 should be Red if Center, else Black
-             // This is getting complex.
-             // EASIER: Just paint everything black, then restore centers.
-             m.color.setHex(colors.Core);
-             m.emissive.setHex(0x000000);
-             m.emissiveMap = null;
-         });
-    });
-    
-    // Restore Centers
-    cubes.forEach(c => {
-        if(c.userData.isCenter) {
-            // Find which face is visible
-            const map = [
-                { idx: 0, val: c.userData.ix, check: 1, col: colors.R },
-                { idx: 1, val: c.userData.ix, check: -1, col: colors.L },
-                { idx: 2, val: c.userData.iy, check: 1, col: colors.U },
-                { idx: 3, val: c.userData.iy, check: -1, col: colors.D },
-                { idx: 4, val: c.userData.iz, check: 1, col: colors.F },
-                { idx: 5, val: c.userData.iz, check: -1, col: colors.B },
-            ];
-            map.forEach(f => {
-                if(f.val === f.check) c.material[f.idx].color.setHex(f.col);
-            });
+             c.material.forEach(m => {
+                 m.color.setHex(colors.Core);
+                 m.emissiveMap = null;
+                 m.needsUpdate = true;
+             });
         }
     });
 
+    // Fix Centers in case they were messed up (though they shouldn't be)
+    // Centers are permanent, so we don't strictly need to repaint them 
+    // unless we allow painting over them (which we blocked).
+    
     statusEl.innerText = "Cube Cleared";
     solutionTextEl.innerText = "";
     updatePaletteCounts();
@@ -327,7 +321,6 @@ function clearCube() {
 function handlePaint(clientX, clientY) {
     if (isAnimating) return;
 
-    // Calculate mouse position in normalized device coordinates
     mouse.x = (clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(clientY / window.innerHeight) * 2 + 1;
 
@@ -338,7 +331,6 @@ function handlePaint(clientX, clientY) {
         const hit = intersects[0];
         const obj = hit.object;
         
-        // Cannot paint centers
         if (obj.userData.isCenter) {
              statusEl.innerText = "Centers are fixed!";
              setTimeout(() => statusEl.innerText = "Ready...", 1000);
@@ -348,13 +340,8 @@ function handlePaint(clientX, clientY) {
         const matIndex = hit.face.materialIndex;
         const mat = obj.material[matIndex];
         
-        // Only paint if this face is an outer face (not Core color initially)
-        // However, user might want to fix mistakes. 
-        // We assume valid face if it's not completely black/hidden.
-        
         mat.color.setHex(colors[paintColor]);
-        mat.emissive.setHex(0x000000); // Clear number
-        mat.emissiveMap = null;
+        mat.emissive.setHex(0x000000);
         mat.needsUpdate = true;
 
         smartAutoFill();
@@ -363,13 +350,12 @@ function handlePaint(clientX, clientY) {
 }
 
 /* =======================
-   SMART FILL (FIX #6)
+   SMART FILL (PROBABILITY)
 ======================= */
 function smartAutoFill() {
     const state = getCubeStateString();
     const counts = countColors(state);
     
-    // 1. Calculate remaining stickers needed
     let missingColors = [];
     for(let k in counts) {
         if(counts[k] < 9) {
@@ -377,29 +363,10 @@ function smartAutoFill() {
         }
     }
     
-    // 2. Count empty spots (Core color on outer faces)
-    // This is tricky. We need to iterate faces.
-    // Simplified: If missingColors.length is small (e.g. <= 4), 
-    // and we have exactly that many empty spots, fill them.
-    
-    if (missingColors.length === 0) return; // Full
-    if (missingColors.length > 5) return;   // Too many to guess safely
+    // If only a few stickers left (<= 5), check if we can autofill
+    if (missingColors.length === 0 || missingColors.length > 5) return;
 
-    // Find all stickers that are currently "Core" (Black) but should be colored
-    // We scan the logical faces.
     let emptyStickers = [];
-    
-    // Helper to check color of a logical face
-    const checkFace = (cx, cy, cz, matIdx) => {
-        const cube = cubes.find(c => c.userData.ix===cx && c.userData.iy===cy && c.userData.iz===cz);
-        if(cube && cube.material[matIdx].color.getHex() === colors.Core) {
-            emptyStickers.push(cube.material[matIdx]);
-        }
-    };
-    
-    // Scan all 6 faces (logic borrowed from getCubeStateString)
-    // This is a bit heavy, but safe
-    // R L U D F B
     const ranges = [
          {x:1, mat:0}, {x:-1, mat:1},
          {y:1, mat:2}, {y:-1, mat:3},
@@ -408,12 +375,10 @@ function smartAutoFill() {
 
     cubes.forEach(c => {
         ranges.forEach(r => {
-            // If cube is on this face side
             if( (r.x && c.userData.ix === r.x) || 
                 (r.y && c.userData.iy === r.y) || 
                 (r.z && c.userData.iz === r.z) ) {
                 
-                // Check if current color is Core (unpainted)
                 if(c.material[r.mat].color.getHex() === colors.Core) {
                      emptyStickers.push(c.material[r.mat]);
                 }
@@ -421,7 +386,7 @@ function smartAutoFill() {
         });
     });
 
-    // Probability Fill: If empty slots match missing count, fill them sequentially
+    // If empty slots match missing count exactly
     if (emptyStickers.length === missingColors.length) {
         statusEl.innerText = "Auto-filling remaining...";
         emptyStickers.forEach((mat, i) => {
@@ -432,9 +397,8 @@ function smartAutoFill() {
     }
 }
 
-
 /* =======================
-   INPUT HANDLING (TOUCH & MOUSE)
+   INPUT HANDLING
 ======================= */
 function onInputStart(e) {
     isMouseDown = true;
@@ -458,7 +422,6 @@ function onInputMove(e) {
     if (Math.abs(dx) > 5 || Math.abs(dy) > 5) isDragging = true;
 
     if (isDragging) {
-        // Rotate the WHOLE cube group
         pivotGroup.rotation.y += dx * 0.005;
         pivotGroup.rotation.x += dy * 0.005;
     }
@@ -468,9 +431,7 @@ function onInputMove(e) {
 function onInputEnd(e) {
     isMouseDown = false;
     
-    // If it was a tap (not drag), handle paint
     if (!isDragging) {
-        // For touchend, we need changedTouches because touches is empty
         let clientX, clientY;
         if(e.changedTouches && e.changedTouches.length > 0) {
             clientX = e.changedTouches[0].clientX;
@@ -485,14 +446,14 @@ function onInputEnd(e) {
 }
 
 /* =======================
-   GET STATE STRING
+   STATE STRING
 ======================= */
 function getColorChar(hex) {
     for (const k in colors) {
         if (k === "Core") continue;
         if (colors[k] === hex) return k;
     }
-    return "?"; // Unknown/Black
+    return "?";
 }
 
 function countColors(state) {
@@ -504,37 +465,25 @@ function countColors(state) {
 function getCubeStateString() {
     let state = "";
     
-    // Order: U, R, F, D, L, B
-    // U Face (y=1):  -1,-1 to 1,1 ?? No.
-    // Standard notation order is:
-    // U1 U2 U3 ... U9
-    // Scan order usually: Top-Left to Bottom-Right of that face
-    
-    // U Face: y=1. z goes -1 to 1? x goes -1 to 1?
-    // Standard U: x(-1->1), z(-1->1) usually.
-    // Let's rely on standard mapping arrays
-    
     const find = (x,y,z) => cubes.find(c => c.userData.ix===x && c.userData.iy===y && c.userData.iz===z);
 
-    // Indices for U, R, F, D, L, B faces
-    // Adjusted for standard orientation
+    // Standard notation scan order
     const faces = [
-        // U (y=1): z=-1..1, x=-1..1 (Top row to bottom row?)
-        // Standard: -1,1,-1  0,1,-1  1,1,-1 ...
+        // U: Top-Left to Bottom-Right
         [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]], 
-        // R (x=1): 
+        // R
         [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]],
-        // F (z=1):
+        // F
         [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]],
-        // D (y=-1):
+        // D
         [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]],
-        // L (x=-1):
+        // L
         [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]],
-        // B (z=-1):
+        // B
         [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]]
     ];
 
-    const matIndices = [2, 0, 4, 3, 1, 5]; // Materials matching faces U,R,F,D,L,B
+    const matIndices = [2, 0, 4, 3, 1, 5];
 
     faces.forEach((facePts, i) => {
         facePts.forEach(pt => {
@@ -559,7 +508,6 @@ function solveCube() {
 
     const cubeStr = getCubeStateString();
     
-    // Validation
     if(cubeStr.includes("?")) {
         alert("Some faces are not painted!");
         return;
@@ -581,10 +529,6 @@ function solveCube() {
 function scrambleCube() {
     if (isAnimating) return;
     
-    // Clear any existing paint to avoid conflicts? 
-    // No, standard scramble works on solved cube usually.
-    // If user painted it, we scramble that state.
-    
     let i = 0;
     const scramble = Array.from({length: 20},
         () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]
@@ -598,112 +542,16 @@ function scrambleCube() {
             return;
         }
         rotateFace(scramble[i++]);
-        setTimeout(apply, 150); // Fast scramble
+        setTimeout(apply, 150);
     }
     apply();
 }
 
 /* =======================
-   ROTATION ENGINE
-======================= */
-/* =======================
-   ROTATION ENGINE (FIXED)
-======================= */
-function rotateFace(move, reverse=false) {
-    if (isAnimating && !move) return; 
-    isAnimating = true;
-
-    let face = move[0];
-    let prime = move.includes("'");
-    let twice = move.includes("2");
-    if (reverse) prime = !prime;
-
-    let dir = prime ? 1 : -1;
-    let axis = new THREE.Vector3();
-    let group = [];
-
-    // Identify axis and selection criteria
-    if (face === "U") axis.set(0, 1, 0);
-    if (face === "D") { axis.set(0, 1, 0); dir *= -1; }
-    if (face === "L") { axis.set(1, 0, 0); dir *= -1; }
-    if (face === "R") axis.set(1, 0, 0);
-    if (face === "F") axis.set(0, 0, 1);
-    if (face === "B") { axis.set(0, 0, 1); dir *= -1; }
-
-    // Select cubes based on logical indices (ix, iy, iz)
-    cubes.forEach(c => {
-        const { ix, iy, iz } = c.userData;
-        if (face === "U" && iy === 1) group.push(c);
-        if (face === "D" && iy === -1) group.push(c);
-        if (face === "L" && ix === -1) group.push(c);
-        if (face === "R" && ix === 1) group.push(c);
-        if (face === "F" && iz === 1) group.push(c);
-        if (face === "B" && iz === -1) group.push(c);
-    });
-
-    // Create a temporary pivot at (0,0,0)
-    const pivot = new THREE.Object3D();
-    pivot.rotation.set(0, 0, 0);
-    pivotGroup.add(pivot);
-
-    // Attach cubes to pivot
-    group.forEach(c => {
-        pivotGroup.remove(c);
-        pivot.add(c);
-    });
-
-    const targetAngle = (twice ? Math.PI : Math.PI/2) * dir;
-    const duration = PLAY_SPEED === 1000 ? 500 : 120; // Fast for scramble
-    const start = Date.now();
-
-    function step() {
-        const now = Date.now();
-        let p = (now - start) / duration;
-        if (p > 1) p = 1;
-
-        // Smooth easing
-        const ease = p * (2 - p);
-        
-        // Rotate on the specific axis
-        pivot.rotation.set(
-            axis.x * targetAngle * ease,
-            axis.y * targetAngle * ease,
-            axis.z * targetAngle * ease
-        );
-
-        if (p < 1) {
-            requestAnimationFrame(step);
-        } else {
-            // FINISH: Re-attach to main group
-            pivot.updateMatrixWorld(); // Ensure pivot transform is final
-            
-            // We must carefully detach to preserve world transforms
-            // But since our pivot is at 0,0,0 inside pivotGroup, it's safer to:
-            // 1. Update the cubies' world matrices
-            // 2. Attach back to pivotGroup
-            
-            for (let i = group.length - 1; i >= 0; i--) {
-                const c = group[i];
-                // Three.js 'attach' handles the coordinate conversion automatically
-                pivotGroup.attach(c); 
-            }
-            
-            pivotGroup.remove(pivot);
-
-            // KEY FIX: Snap positions to grid so next move works
-            updateCubeIndices();
-
-            isAnimating = false;
-        }
-    }
-    step();
-}
-
-/* =======================
-   PLAYBACK
+   PLAYBACK CONTROLS
 ======================= */
 function updateStepStatus() {
-    statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length} <br> <span style='font-size:14px;color:#aaa'>Next: ${solutionMoves[moveIndex] || "Done"}</span>`;
+    statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length}`;
 }
 
 function nextMove() {
@@ -729,7 +577,7 @@ function togglePlay() {
         if(btn) btn.innerText = "PLAY";
     } else {
         if(!solutionMoves.length) return;
-        if(moveIndex >= solutionMoves.length) moveIndex = 0; // Restart if done
+        if(moveIndex >= solutionMoves.length) moveIndex = 0;
         
         if(btn) btn.innerText = "PAUSE";
         
@@ -744,7 +592,7 @@ function togglePlay() {
                     statusEl.innerText = "Solved!";
                 }
             }
-        }, PLAY_SPEED); // 1 Second
+        }, PLAY_SPEED);
     }
 }
 
