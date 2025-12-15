@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – SCRAMBLE FIX FINAL VERSION
+   RUBIK'S CUBE SOLVER – ROBUST VECTOR COLOR READING
    ========================================================= */
 
 /* =======================
@@ -16,8 +16,8 @@ const colors = {
 };
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
-const PLAY_SPEED = 1000; // 1 Second per move for playback
-const SCRAMBLE_SPEED = 100; // 100ms per move for scramble (fast but safe)
+const PLAY_SPEED = 1000; // 1 Second per move
+const SCRAMBLE_SPEED = 100; // Fast scramble
 
 /* =======================
    GLOBAL STATE
@@ -83,7 +83,7 @@ solverWorker.onmessage = (e) => {
     }
 
     if (d.type === "error") {
-        statusEl.innerText = "Invalid Cube Configuration";
+        statusEl.innerText = "Invalid Configuration";
         statusEl.style.color = "red";
         alert("Solver Error: " + d.message);
     }
@@ -99,8 +99,6 @@ function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111);
 
-    // FIXED: Camera moved further back (Z=12) to reduce size
-    // Angle set to create a nice isometric view
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(8, 7, 12); 
     camera.lookAt(0, 0, 0);
@@ -127,7 +125,6 @@ function init() {
 
     createCube();
 
-    // Initial Rotation: slightly rotated so it doesn't look flat/diagonal
     pivotGroup.rotation.x = 0;
     pivotGroup.rotation.y = -0.5;
 
@@ -157,19 +154,19 @@ function createCube() {
         for (let y = -1; y <= 1; y++)
             for (let z = -1; z <= 1; z++) {
                 
+                // Material Order: Right, Left, Top, Bottom, Front, Back
                 const mats = [
-                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }), // R
-                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }), // L
-                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }), // U
-                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }), // D
-                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }), // F
-                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })  // B
+                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }), // 0: Right
+                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }), // 1: Left
+                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }), // 2: Top
+                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }), // 3: Bottom
+                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }), // 4: Front
+                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })  // 5: Back
                 ];
 
                 const cube = new THREE.Mesh(geo, mats);
                 cube.position.set(x, y, z);
                 
-                // Initialize Logical Indices
                 cube.userData = { 
                     ix: x, iy: y, iz: z, 
                     isCenter: (Math.abs(x) + Math.abs(y) + Math.abs(z)) === 1
@@ -180,28 +177,17 @@ function createCube() {
             }
 }
 
-/* =======================
-   CRITICAL: GRID SNAPPING
-======================= */
 function snapToGrid() {
     cubes.forEach(c => {
-        // 1. Force Position to Integer
-        c.position.set(
-            Math.round(c.position.x),
-            Math.round(c.position.y),
-            Math.round(c.position.z)
-        );
-
-        // 2. Force Rotation to 90-degree steps
+        c.position.set(Math.round(c.position.x), Math.round(c.position.y), Math.round(c.position.z));
+        
         const euler = new THREE.Euler().setFromQuaternion(c.quaternion);
         euler.x = Math.round(euler.x / (Math.PI/2)) * (Math.PI/2);
         euler.y = Math.round(euler.y / (Math.PI/2)) * (Math.PI/2);
         euler.z = Math.round(euler.z / (Math.PI/2)) * (Math.PI/2);
         c.quaternion.setFromEuler(euler);
-        
         c.updateMatrix();
 
-        // 3. Update Logical Indices based on the new Snapped Position
         c.userData.ix = Math.round(c.position.x);
         c.userData.iy = Math.round(c.position.y);
         c.userData.iz = Math.round(c.position.z);
@@ -209,11 +195,10 @@ function snapToGrid() {
 }
 
 /* =======================
-   ROTATION ENGINE (CALLBACK BASED)
+   ROTATION (WITH CALLBACK)
 ======================= */
-// Added 'onComplete' callback to ensure sync
 function rotateFace(move, reverse=false, onComplete=null) {
-    if (isAnimating && !onComplete) return; // Block user clicks if animating
+    if (isAnimating && !onComplete) return;
     isAnimating = true;
 
     let face = move[0];
@@ -225,10 +210,8 @@ function rotateFace(move, reverse=false, onComplete=null) {
     let axis = "y"; 
     let group = [];
 
-    // SELECT CUBES based on current logical positions
     cubes.forEach(c => {
         const { ix, iy, iz } = c.userData;
-        
         if(face==="U" && iy === 1) { axis="y"; group.push(c); }
         if(face==="D" && iy === -1){ axis="y"; dir *= -1; group.push(c); }
         if(face==="R" && ix === 1) { axis="x"; group.push(c); }
@@ -240,12 +223,9 @@ function rotateFace(move, reverse=false, onComplete=null) {
     const pivot = new THREE.Object3D();
     pivot.rotation.set(0,0,0);
     pivotGroup.add(pivot);
-
     group.forEach(c => pivot.attach(c));
 
     const targetAngle = (twice ? Math.PI : Math.PI/2) * dir;
-    
-    // Scramble is fast, Playback is slow
     const speed = onComplete ? SCRAMBLE_SPEED : PLAY_SPEED; 
     const start = Date.now();
 
@@ -260,14 +240,11 @@ function rotateFace(move, reverse=false, onComplete=null) {
         if(p < 1) {
             requestAnimationFrame(step);
         } else {
-            // FINISH
             pivot.rotation[axis] = targetAngle;
             pivot.updateMatrixWorld();
-
             group.forEach(c => pivotGroup.attach(c));
             pivotGroup.remove(pivot);
             
-            // KEY: Snap to grid BEFORE allowing next move
             snapToGrid();
             
             isAnimating = false;
@@ -277,79 +254,134 @@ function rotateFace(move, reverse=false, onComplete=null) {
     step();
 }
 
-/* =======================
-   SCRAMBLE (RECURSIVE QUEUE)
-======================= */
 function scrambleCube() {
     if (isAnimating) return;
-    
-    // Reset state first to ensure clean slate? No, scramble from current.
     statusEl.innerText = "Scrambling...";
-    
-    // Generate 20 random moves
-    const moves = Array.from({length: 20}, () => 
-        SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]
-    );
-
+    const moves = Array.from({length: 20}, () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]);
     let i = 0;
-    
-    // Recursive function to ensure Move 2 waits for Move 1
     function nextMove() {
         if (i >= moves.length) {
             statusEl.innerText = "Ready to Solve";
             return;
         }
-        
-        const move = moves[i++];
-        // Call rotateFace and pass 'nextMove' as callback
-        rotateFace(move, false, nextMove);
+        rotateFace(moves[i++], false, nextMove);
     }
-    
-    nextMove(); // Start the chain
+    nextMove();
 }
 
 /* =======================
-   PALETTE & PAINT
+   STATE STRING (VECTOR FIXED)
 ======================= */
-function updatePaletteCounts() {
-    const state = getCubeStateString();
-    const counts = countColors(state);
-    
-    document.querySelectorAll(".swatch").forEach(s => {
-        const color = s.dataset.color;
-        const span = s.querySelector(".count");
-        if (span) span.innerText = counts[color];
-        s.style.opacity = (counts[color] >= 9) ? 0.3 : 1;
-        if(color === paintColor) s.style.opacity = 1;
-    });
+function getColorChar(hex) {
+    for (const k in colors) {
+        if (k === "Core") continue;
+        if (colors[k] === hex) return k;
+    }
+    return "?"; // Core/Black
 }
 
-function selectColor(el, c) {
-    paintColor = c;
-    document.querySelectorAll(".swatch").forEach(s => s.classList.remove("selected"));
-    el.classList.add("selected");
-    updatePaletteCounts();
+function countColors(state) {
+    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
+    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
+    return c;
 }
 
-function clearCube() {
-    if(isAnimating) return;
-    if(!confirm("Clear all colors?")) return;
+// THE FIX: Use Vector Math to find which face is pointing where
+function getVisibleColor(cube, worldDir) {
+    // 1. Transform World Direction into Local Direction of the cube
+    // We want to know: "Which local face is pointing in WorldDir?"
+    // LocalDir = InverseQuaternion * WorldDir
+    const localDir = worldDir.clone().applyQuaternion(cube.quaternion.clone().invert()).round();
 
-    cubes.forEach(c => {
-        if(!c.userData.isCenter) {
-             c.material.forEach(m => {
-                 m.color.setHex(colors.Core);
-                 m.emissiveMap = null;
-                 m.needsUpdate = true;
-             });
-        }
-    });
+    // 2. Map Local Direction to Material Index
+    // (1,0,0) -> Right (0)
+    // (-1,0,0) -> Left (1)
+    // (0,1,0) -> Top (2)
+    // (0,-1,0) -> Bottom (3)
+    // (0,0,1) -> Front (4)
+    // (0,0,-1) -> Back (5)
+
+    let matIndex = -1;
+    if (localDir.x === 1) matIndex = 0;
+    if (localDir.x === -1) matIndex = 1;
+    if (localDir.y === 1) matIndex = 2;
+    if (localDir.y === -1) matIndex = 3;
+    if (localDir.z === 1) matIndex = 4;
+    if (localDir.z === -1) matIndex = 5;
+
+    if (matIndex === -1) return colors.Core; // Should not happen on valid cube
+
+    return cube.material[matIndex].color.getHex();
+}
+
+function getCubeStateString() {
+    let state = "";
     
-    statusEl.innerText = "Cube Cleared";
-    solutionTextEl.innerText = "";
-    document.getElementById("action-controls").style.display = "flex";
-    document.getElementById("playback-controls").style.display = "none";
-    updatePaletteCounts();
+    // Find cube by rounded position
+    const find = (x,y,z) => cubes.find(c => 
+        Math.round(c.position.x)===x && 
+        Math.round(c.position.y)===y && 
+        Math.round(c.position.z)===z
+    );
+
+    // Define Face Scans (Position + Direction Normal)
+    const scanConfig = [
+        // U Face: y=1, Normal=(0,1,0)
+        { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] },
+        // R Face: x=1, Normal=(1,0,0)
+        { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] },
+        // F Face: z=1, Normal=(0,0,1)
+        { norm: new THREE.Vector3(0,0,1), pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] },
+        // D Face: y=-1, Normal=(0,-1,0)
+        { norm: new THREE.Vector3(0,-1,0), pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] },
+        // L Face: x=-1, Normal=(-1,0,0)
+        { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] },
+        // B Face: z=-1, Normal=(0,0,-1)
+        { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] }
+    ];
+
+    scanConfig.forEach(face => {
+        face.pts.forEach(pt => {
+            const cube = find(pt[0], pt[1], pt[2]);
+            if(cube) {
+                // KEY CHANGE: Get color based on orientation
+                const hex = getVisibleColor(cube, face.norm);
+                state += getColorChar(hex);
+            } else {
+                state += "?";
+            }
+        });
+    });
+    return state;
+}
+
+/* =======================
+   SOLVE & UTILS
+======================= */
+function solveCube() {
+    if (!engineReady) return alert("Engine loading...");
+    
+    // Ensure grid is snapped before reading
+    snapToGrid();
+
+    const cubeStr = getCubeStateString();
+    
+    if(cubeStr.includes("?")) {
+        alert("Some faces are not painted (or internal error)!");
+        console.log(cubeStr); // Debug
+        return;
+    }
+
+    const counts = countColors(cubeStr);
+    const invalid = Object.entries(counts).filter(([_,v]) => v !== 9);
+    if (invalid.length) {
+        alert(`Invalid Colors! Each color must appear exactly 9 times.`);
+        return;
+    }
+
+    statusEl.innerText = "Computing solution...";
+    statusEl.style.color = "cyan";
+    solverWorker.postMessage({ type:"solve", cube: cubeStr });
 }
 
 function handlePaint(clientX, clientY) {
@@ -376,201 +408,51 @@ function handlePaint(clientX, clientY) {
         
         mat.color.setHex(colors[paintColor]);
         mat.needsUpdate = true;
-
-        smartAutoFill();
+        
         updatePaletteCounts();
     }
 }
 
-/* =======================
-   SMART AUTOFILL (IMPROVED)
-======================= */
-function smartAutoFill() {
+function updatePaletteCounts() {
+    // Only update if not animating to save resources
+    if(isAnimating) return;
     const state = getCubeStateString();
     const counts = countColors(state);
     
-    let missingColors = [];
-    for(let k in counts) {
-        if(counts[k] < 9) {
-            for(let i=0; i < (9 - counts[k]); i++) missingColors.push(k);
-        }
-    }
-    
-    if (missingColors.length === 0) return;
-
-    // Find visible empty stickers
-    let emptyStickers = [];
-    
-    cubes.forEach(c => {
-        // Use ROUNDED positions to check faces
-        const x = Math.round(c.position.x);
-        const y = Math.round(c.position.y);
-        const z = Math.round(c.position.z);
-        
-        // Check only exposed faces
-        const check = (faceVal, targetVal, matIdx) => {
-            if(faceVal === targetVal && c.material[matIdx].color.getHex() === colors.Core) {
-                emptyStickers.push(c.material[matIdx]);
-            }
-        };
-
-        check(x, 1, 0);  // Right
-        check(x, -1, 1); // Left
-        check(y, 1, 2);  // Up
-        check(y, -1, 3); // Down
-        check(z, 1, 4);  // Front
-        check(z, -1, 5); // Back
+    document.querySelectorAll(".swatch").forEach(s => {
+        const color = s.dataset.color;
+        const span = s.querySelector(".count");
+        if (span) span.innerText = counts[color];
+        s.style.opacity = (counts[color] >= 9) ? 0.3 : 1;
+        if(color === paintColor) s.style.opacity = 1;
     });
+}
 
-    // Only auto-fill if the number of empty spots matches missing colors EXACTLY
-    // (and we aren't trying to fill the whole cube from scratch, limit to last 10)
-    if (emptyStickers.length === missingColors.length && missingColors.length <= 12) {
-        statusEl.innerText = "Auto-filling...";
-        emptyStickers.forEach((mat, i) => {
-            mat.color.setHex(colors[missingColors[i]]);
-            mat.needsUpdate = true;
-        });
-        updatePaletteCounts();
-    }
+function selectColor(el, c) {
+    paintColor = c;
+    document.querySelectorAll(".swatch").forEach(s => s.classList.remove("selected"));
+    el.classList.add("selected");
+    updatePaletteCounts();
+}
+
+function clearCube() {
+    if(isAnimating) return;
+    if(!confirm("Clear all colors?")) return;
+    
+    // Reset Everything
+    createCube();
+    pivotGroup.rotation.set(0, -0.5, 0);
+    
+    statusEl.innerText = "Cube Cleared";
+    solutionTextEl.innerText = "";
+    document.getElementById("action-controls").style.display = "flex";
+    document.getElementById("playback-controls").style.display = "none";
+    updatePaletteCounts();
 }
 
 /* =======================
-   INPUT: DRAG & CLICK
+   CONTROLS
 ======================= */
-function onInputStart(e) {
-    // isAnimating check removed to allow stopping play, 
-    // but drag logic should check it
-    isMouseDown = true;
-    isDragging = false;
-    
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const cy = e.touches ? e.touches[0].clientY : e.clientY;
-    
-    startMouse = { x: cx, y: cy };
-    lastMouse = { x: cx, y: cy };
-}
-
-function onInputMove(e) {
-    if (!isMouseDown) return;
-    
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const cy = e.touches ? e.touches[0].clientY : e.clientY;
-
-    const dx = cx - lastMouse.x;
-    const dy = cy - lastMouse.y;
-    
-    if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) {
-        isDragging = true;
-    }
-
-    if (isDragging) {
-        pivotGroup.rotation.y += dx * 0.006;
-        pivotGroup.rotation.x += dy * 0.006;
-    }
-    lastMouse = { x: cx, y: cy };
-}
-
-function onInputEnd(e) {
-    isMouseDown = false;
-    
-    if (!isDragging) {
-        let cx, cy;
-        if(e.changedTouches && e.changedTouches.length > 0) {
-            cx = e.changedTouches[0].clientX;
-            cy = e.changedTouches[0].clientY;
-        } else {
-            cx = e.clientX;
-            cy = e.clientY;
-        }
-        handlePaint(cx, cy);
-    }
-    isDragging = false;
-}
-
-/* =======================
-   STATE STRING
-======================= */
-function getColorChar(hex) {
-    for (const k in colors) {
-        if (k === "Core") continue;
-        if (colors[k] === hex) return k;
-    }
-    return "?";
-}
-
-function countColors(state) {
-    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
-    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
-    return c;
-}
-
-function getCubeStateString() {
-    let state = "";
-    
-    // Lookup by ROUNDED position
-    const find = (x,y,z) => cubes.find(c => 
-        Math.round(c.position.x)===x && 
-        Math.round(c.position.y)===y && 
-        Math.round(c.position.z)===z
-    );
-
-    // Standard Face Order for Kociemba Solver
-    const faces = [
-        // U: Top Face
-        [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]], 
-        // R: Right Face
-        [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]],
-        // F: Front Face
-        [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]],
-        // D: Down Face
-        [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]],
-        // L: Left Face
-        [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]],
-        // B: Back Face
-        [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]]
-    ];
-    const matIndices = [2, 0, 4, 3, 1, 5];
-
-    faces.forEach((facePts, i) => {
-        facePts.forEach(pt => {
-            const cube = find(pt[0], pt[1], pt[2]);
-            if(cube) {
-                const hex = cube.material[matIndices[i]].color.getHex();
-                state += getColorChar(hex);
-            } else {
-                state += "?";
-            }
-        });
-    });
-    return state;
-}
-
-/* =======================
-   SOLVE & CONTROLS
-======================= */
-function solveCube() {
-    if (!engineReady) return alert("Engine loading...");
-
-    const cubeStr = getCubeStateString();
-    
-    if(cubeStr.includes("?")) {
-        alert("Some faces are not painted!");
-        return;
-    }
-
-    const counts = countColors(cubeStr);
-    const invalid = Object.entries(counts).filter(([_,v]) => v !== 9);
-    if (invalid.length) {
-        alert(`Invalid Colors! Each color must appear exactly 9 times.`);
-        return;
-    }
-
-    statusEl.innerText = "Computing solution...";
-    statusEl.style.color = "cyan";
-    
-    solverWorker.postMessage({ type:"solve", cube: cubeStr });
-}
-
 function updateStepStatus() {
     statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length}`;
 }
@@ -591,7 +473,6 @@ function prevMove() {
 
 function togglePlay() {
     const btn = document.getElementById("playPauseBtn");
-
     if (playInterval) {
         clearInterval(playInterval);
         playInterval = null;
@@ -599,14 +480,11 @@ function togglePlay() {
     } else {
         if(!solutionMoves.length) return;
         if(moveIndex >= solutionMoves.length) moveIndex = 0;
-        
         if(btn) btn.innerText = "PAUSE";
-        
         playInterval = setInterval(() => {
             if(!isAnimating){
-                if(moveIndex < solutionMoves.length) {
-                    nextMove();
-                } else {
+                if(moveIndex < solutionMoves.length) nextMove();
+                else {
                     clearInterval(playInterval);
                     playInterval = null;
                     if(btn) btn.innerText = "PLAY";
@@ -622,7 +500,49 @@ function resetCube() {
 }
 
 /* =======================
-   RENDER LOOP
+   INPUT
+======================= */
+function onInputStart(e) {
+    isMouseDown = true;
+    isDragging = false;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    startMouse = { x: cx, y: cy };
+    lastMouse = { x: cx, y: cy };
+}
+
+function onInputMove(e) {
+    if (!isMouseDown) return;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    const dx = cx - lastMouse.x;
+    const dy = cy - lastMouse.y;
+    if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) isDragging = true;
+    if (isDragging) {
+        pivotGroup.rotation.y += dx * 0.006;
+        pivotGroup.rotation.x += dy * 0.006;
+    }
+    lastMouse = { x: cx, y: cy };
+}
+
+function onInputEnd(e) {
+    isMouseDown = false;
+    if (!isDragging) {
+        let cx, cy;
+        if(e.changedTouches && e.changedTouches.length > 0) {
+            cx = e.changedTouches[0].clientX;
+            cy = e.changedTouches[0].clientY;
+        } else {
+            cx = e.clientX;
+            cy = e.clientY;
+        }
+        handlePaint(cx, cy);
+    }
+    isDragging = false;
+}
+
+/* =======================
+   ANIMATION LOOP
 ======================= */
 function animate() {
     requestAnimationFrame(animate);
