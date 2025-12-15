@@ -314,9 +314,28 @@ function runLogicalAutofill() {
                 const missing = candidates[0].filter(c => !p.painted.includes(c));
 
                 emptyFaces.forEach(f => {
-                    const allowed = missing.filter(c => c !== OPPOSITES[f.dir]);
+                    emptyFaces.forEach(f => {
+    const possibleColors = new Set();
 
-                    if (allowed.length === 1) {
+    candidates.forEach(cand => {
+        cand
+          .filter(c => !p.painted.includes(c))
+          .forEach(c => {
+              if (c !== OPPOSITES[f.dir]) {
+                  possibleColors.add(c);
+              }
+          });
+    });
+
+    // SAFE: only one color survives across ALL candidates
+    if (possibleColors.size === 1) {
+        const color = [...possibleColors][0];
+        f.mat.color.setHex(colors[color]);
+        f.mat.needsUpdate = true;
+        loopChanges = true;
+    }
+});
+
                         const otherFaces = emptyFaces.filter(of => of !== f);
                         const exclusive = !otherFaces.some(of =>
                             allowed[0] !== OPPOSITES[of.dir]
