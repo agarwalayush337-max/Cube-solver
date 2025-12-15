@@ -220,173 +220,214 @@ function getVisibleFaceMatIndex(cube, worldDir) {
    THE CONSTRAINT SOLVER (LOGIC ENGINE)
 ======================= */
 function runLogicalAutofill() {
-    let loopChanges = true;
-    let iteration = 0;
+    let changed = true;
+    let iterations = 0;
+    const MAX_ITER = 50;
 
-    // Iterate until logical deductions stabilize (Constraint Propagation)
-    while (loopChanges && iteration < 30) {
-        loopChanges = false;
-        iteration++;
+    while (changed && iterations < MAX_ITER) {
+        changed = false;
+        iterations++;
 
-        // 1. Snapshot: Analyze the Board
-        let boardPieces = []; 
-        const getExposedFaces = (c) => {
-            const x = Math.round(c.position.x);
-            const y = Math.round(c.position.y);
-            const z = Math.round(c.position.z);
+        // === 1. Collect current board state: exposed faces and their colors ===
+        const boardSlots = [];
+
+        cubes.forEach(c => {
+            if (c.userData.isCenter) return;
+
+            const pos = {
+                x: Math.round(c.position.x),
+                y: Math.round(c.position.y),
+                z: Math.round(c.position.z)
+            };
+
             const exposed = [];
-            // Check all 6 directions to see if this cubie exposes a face there
-            const check = (wx, wy, wz, faceName) => {
-                if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
-                    const norm = new THREE.Vector3(wx, wy, wz);
-                    const matIdx = getVisibleFaceMatIndex(c, norm);
+            const checkFace = (dx, dy, dz, faceName) => {
+                if ((dx !== 0 && pos.x === dx) ||
+                    (dy !== 0 && pos.y === dy) ||
+                    (dz !== 0 && pos.z === dz)) {
+                    const worldNormal = new THREE.Vector3(dx, dy, dz);
+                    const matIdx = getVisibleFaceMatIndex(c, worldNormal);
                     if (matIdx !== -1) {
-                        const mat = c.material[matIdx];
-                        const k = getColorName(mat.color.getHex());
-                        exposed.push({ dir: faceName, mat: mat, color: k });
+                        const colorName = getColorName(c.material[matIdx].color.getHex());
+                        exposed.push({
+                            dir: faceName,
+                            mat: c.material[matIdx],
+                            color: colorName // null if unpainted
+                        });
                     }
                 }
             };
-            check(0,1,0,"U"); check(0,-1,0,"D");
-            check(1,0,0,"R"); check(-1,0,0,"L");
-            check(0,0,1,"F"); check(0,0,-1,"B");
-            return exposed;
-        };
 
-        cubes.forEach(c => {
-            if(c.userData.isCenter) return;
-            const faces = getExposedFaces(c);
-            if(faces.length === 0) return;
-            const paintedColors = faces.map(f => f.color).filter(c => c !== null);
-            boardPieces.push({
-                obj: c,
-                type: faces.length === 3 ? 'corner' : 'edge',
-                faces: faces,
-                painted: paintedColors,
-                isComplete: paintedColors.length === faces.length
+            checkFace(0, 1, 0, "U"); checkFace(0, -1, 0, "D");
+            checkFace(1, 0, 0, "R"); checkFace(-1, 0, 0, "L");
+            checkFace(0, 0, 1, "F"); checkFace(0, 0, -1, "B");
+
+            if (exposed.length === 0) return;
+
+            const knownColors = exposed.map(f => f.color).filter(c => c !== null);
+            const type = exposed.length === 3 ? 'corner' : 'edge';
+
+            boardSlots.push({
+                cube: c,
+                type,
+                faces: exposed,
+                known: knownColors,
+                emptyFaces: exposed.filter(f => f.color === null)
             });
         });
 
-        // 2. Inventory: Remove pieces that are already 100% identified
-        let availablePieces = JSON.parse(JSON.stringify(STANDARD_PIECES)); // Deep copy
+        if (boardSlots.length === 0) break;
 
-        boardPieces.forEach(p => {
-            if (p.isComplete) {
-                // Find matching piece in inventory and remove it
-                // We use Sets because order of painting doesn't matter for identification
-                const set = new Set(p.painted);
-                const idx = availablePieces.findIndex(inv => 
-                    inv.length === p.painted.length && inv.every(col => set.has(col))
+        // === 2. Build available pieces (remove fully identified ones) ===
+        let available = JSON.parse(JSON.stringify(STANDARD_PIECES));
+
+        // Remove pieces that are already fully painted and matched
+        boardSlots.forEach(slot => {
+            if (slot.emptyFaces.length === 0) {
+                const set = new Set(slot.known);
+                const idx = available.findIndex(p => 
+                    p.length === slot.known.length && p.every(col => set.has(col))
                 );
-                if(idx !== -1) availablePieces.splice(idx, 1);
+                if (idx !== -1) available.splice(idx, 1);
             }
         });
 
-        // 3. Deduction: Try to fit remaining pieces into remaining slots
-        boardPieces.forEach(p => {
-            if (p.isComplete) return; 
-            if (p.painted.length === 0) return; // Too ambiguous
+        // === 3. For each slot: find possible candidate pieces ===
+        boardSlots.forEach(slot => {
+            if (slot.emptyFaces.length === 0) return; // already complete
 
-            // A. Filter Candidates by Colors present
-            let candidates = availablePieces.filter(cand => 
-                cand.length === (p.type==='corner'?3:2) && 
-                p.painted.every(paint => cand.includes(paint))
-            );
-
-            // B. Filter Candidates by FACE CONSTRAINT (Smart Logic)
-            // Example: If a slot is on the "Up" face, it CANNOT accept a "Yellow" (D) sticker.
-            // This prevents "Wrongly Filling" / bad rotation.
-            candidates = candidates.filter(cand => {
-                // For every EMPTY face on this board piece...
-                // Are there valid colors left in the candidate to fill it?
-                const missingColors = cand.filter(c => !p.painted.includes(c));
-                
-                // If there is a candidate color that matches the OPPOSITE of a face, 
-                // it's an invalid candidate for this slot.
-                // e.g. Slot has 'U' face. Candidate has 'D' color. 'D' cannot go on 'U'.
-                
-                // Check every face of this slot
-                for (let f of p.faces) {
-                    const forbidden = OPPOSITES[f.dir]; // e.g. If face is U, forbidden is D
-                    // If the candidate contains the forbidden color, AND the face is currently empty...
-                    // Wait, if the face is empty, it MUST take one of the missing colors.
-                    // If ALL missing colors are forbidden on the empty faces, this candidate is impossible.
-                    
-                    // Actually, simpler check:
-                    // Does the candidate contain ANY color that is strictly impossible for this location?
-                    // The candidate "White-Yellow-Red" is impossible regardless of rotation.
-                    // But STANDARD_PIECES doesn't contain those.
-                    
-                    // Rotation Check:
-                    // If we assign this candidate, can we map its colors to the faces validly?
-                    // This is complex. Let's use the simple forbidden rule:
-                    // If a face is 'U', it can never take 'D'.
-                    // If a face is 'R', it can never take 'L'.
-                }
-                
-                // Simplified constraint:
-                // Does the missing set contain a color that is valid for the empty faces?
-                // Let's rely on the inventory reduction first, it's safer.
-                return true;
+            let candidates = available.filter(piece => {
+                if (piece.length !== (slot.type === 'corner' ? 3 : 2)) return false;
+                // Must contain all known colors
+                return slot.known.every(k => piece.includes(k));
             });
 
-            // If exactly one candidate remains, we solve it.
-            if (candidates.length === 1) {
-                const match = candidates[0];
-                const missingColors = match.filter(c => !p.painted.includes(c));
-                
-                // Only fill if we can do so UNAMBIGUOUSLY
-                const emptyFaces = p.faces.filter(f => f.color === null);
-                
-                // 1. If only 1 empty face and 1 missing color -> Fill it (100% safe)
-                if (emptyFaces.length === 1 && missingColors.length === 1) {
-                    const f = emptyFaces[0];
-                    // Final safety check: Is the color allowed on this face?
-                    if (missingColors[0] !== OPPOSITES[f.dir]) {
-                        f.mat.color.setHex(colors[missingColors[0]]);
-                        f.mat.needsUpdate = true;
-                        loopChanges = true;
-                    }
-                }
-                // 2. If multiple empty faces (e.g. Corner with 1 paint), we need strict constraint check
-                else if (emptyFaces.length > 1) {
-                    // Try to map missing colors to empty faces based on Forbidden rules
-                    let solvedCount = 0;
-                    
-                    emptyFaces.forEach(f => {
-                        // Find which of the missing colors is ALLOWED on this face
-                        // A color is allowed if it is NOT the opposite of the face
-                        // AND if it isn't the opposite of the *other* painted colors?
-                        
-                        const allowed = missingColors.filter(col => col !== OPPOSITES[f.dir]);
-                        
-                        // If only 1 color is allowed on this face, it MUST be that one.
-                        if (allowed.length === 1) {
-                            // Also need to check if that color is unique to this face among the empty ones?
-                            // Let's just be aggressive here if inventory is reduced enough.
-                            
-                            // Check uniqueness: Is this color valid for the OTHER empty face too?
-                            // If yes, we can't decide yet.
-                            const otherFaces = emptyFaces.filter(ef => ef !== f);
-                            const isAmbiguous = otherFaces.some(ef => {
-                                return allowed[0] !== OPPOSITES[ef.dir];
-                            });
+            // Apply opposite-face constraint: no piece can place opposite color on a face
+            candidates = candidates.filter(piece => {
+                // Try all possible rotations/orientations implicitly via assignment check
+                // For edges: 2 possible flips
+                // For corners: 3 possible rotations
+                const required = slot.type === 'corner' ? 3 : 2;
+                const colors = piece.slice();
 
-                            if (!isAmbiguous) {
-                                f.mat.color.setHex(colors[allowed[0]]);
-                                f.mat.needsUpdate = true;
-                                solvedCount++;
-                            }
+                // Generate all permutations for corners, flips for edges
+                const permutations = slot.type === 'corner'
+                    ? generateCornerPermutations(colors)
+                    : generateEdgeFlips(colors);
+
+                return permutations.some(perm => {
+                    return slot.faces.every(face => {
+                        if (face.color !== null) return true; // already matches
+                        const assignedColor = perm[slot.faces.indexOf(face)];
+                        return assignedColor !== OPPOSITES[face.dir];
+                    });
+                });
+            });
+
+            // === Deduction 1: Only one candidate → fill all missing ===
+            if (candidates.length === 1) {
+                const piece = candidates[0];
+                const missingColors = piece.filter(c => !slot.known.includes(c));
+
+                // Try to assign missing colors respecting opposites
+                const perm = findValidAssignment(slot.faces, slot.known, missingColors);
+                if (perm) {
+                    let filled = false;
+                    slot.faces.forEach((face, i) => {
+                        if (face.color === null && perm[i] !== undefined) {
+                            face.mat.color.setHex(colors[perm[i]]);
+                            face.mat.needsUpdate = true;
+                            filled = true;
                         }
                     });
-                    
-                    if(solvedCount > 0) loopChanges = true;
+                    if (filled) changed = true;
                 }
+            }
+
+            // === Deduction 2: For each empty face, check if only ONE color is possible ===
+            if (candidates.length > 0) {
+                slot.emptyFaces.forEach(emptyFace => {
+                    const possibleColors = new Set();
+
+                    candidates.forEach(piece => {
+                        const missing = piece.filter(c => !slot.known.includes(c));
+                        const perms = slot.type === 'corner'
+                            ? generateCornerPermutations(piece)
+                            : generateEdgeFlips(piece);
+
+                        perms.forEach(perm => {
+                            const idx = slot.faces.indexOf(emptyFace);
+                            const col = perm[idx];
+                            if (col !== OPPOSITES[emptyFace.dir]) {
+                                possibleColors.add(col);
+                            }
+                        });
+                    });
+
+                    if (possibleColors.size === 1) {
+                        const onlyColor = [...possibleColors][0];
+                        emptyFace.mat.color.setHex(colors[onlyColor]);
+                        emptyFace.mat.needsUpdate = true;
+                        changed = true;
+                    }
+                });
             }
         });
     }
-    
-    if(iteration > 1) updatePaletteCounts();
+
+    if (changed || iterations > 1) {
+        updatePaletteCounts();
+    }
+}
+
+// Helper: generate all valid corner rotations (3 cycles)
+function generateCornerPermutations(colors) {
+    const perms = [];
+    const c = colors.slice();
+    perms.push(c.slice());
+    // Rotate first color to second and third position
+    perms.push([c[1], c[2], c[0]]);
+    perms.push([c[2], c[0], c[1]]);
+    return perms;
+}
+
+// Helper: generate both flips for edges
+function generateEdgeFlips(colors) {
+    return [colors.slice(), [colors[1], colors[0]]];
+}
+
+// Try to find a valid assignment of missing colors to empty faces
+function findValidAssignment(faces, knownColors, missingColors) {
+    const emptyIndices = faces
+        .map((f, i) => f.color === null ? i : -1)
+        .filter(i => i !== -1);
+
+    if (emptyIndices.length !== missingColors.length) return null;
+
+    const perms = permute(missingColors);
+    for (const perm of perms) {
+        let valid = true;
+        emptyIndices.forEach((idx, i) => {
+            if (perm[i] === OPPOSITES[faces[idx].dir]) {
+                valid = false;
+            }
+        });
+        if (valid) return faces.map((f, i) => f.color || perm[emptyIndices.indexOf(i)]);
+    }
+    return null;
+}
+
+// Simple permutation generator
+function permute(arr) {
+    if (arr.length <= 1) return [arr.slice()];
+    const result = [];
+    for (let i = 0; i < arr.length; i++) {
+        const rest = arr.slice(0, i).concat(arr.slice(i + 1));
+        for (const p of permute(rest)) {
+            result.push([arr[i]].concat(p));
+        }
+    }
+    return result;
 }
 
 
