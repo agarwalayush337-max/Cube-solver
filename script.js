@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – VISUAL AWARE & SMOOTH ANIMATION
+   RUBIK'S CUBE SOLVER – HINT SYSTEM & AUTOFILL STATS
    ========================================================= */
 
 /* =======================
@@ -28,7 +28,7 @@ const ALL_EDGES = [
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
 const PLAY_SPEED = 400; // Speed of the rotation itself
-const MOVE_GAP = 800;   // Delay between moves (Gap)
+const MOVE_GAP = 300;   // Delay between moves (Gap)
 
 /* =======================
    GLOBAL STATE
@@ -36,14 +36,17 @@ const MOVE_GAP = 800;   // Delay between moves (Gap)
 let scene, camera, renderer;
 let raycaster, mouse;
 let cubes = [], pivotGroup;
+let hintBox; // The blinking wireframe
 
 let isAnimating = false;
 let paintColor = "U";
 
-let solutionMoves = []; // logical moves (for engine)
-let displayMoves = [];  // visual moves (for UI text)
+let solutionMoves = []; // logical moves
+let displayMoves = [];  // visual moves
 let moveIndex = 0;
 let playInterval = null;
+
+let autofillCount = 0; // Stats counter
 
 let isMouseDown = false;
 let isDragging = false;
@@ -51,11 +54,28 @@ let startMouse = { x: 0, y: 0 };
 let lastMouse = { x: 0, y: 0 };
 
 /* =======================
-   WORKER SETUP
+   UI ELEMENTS (Dynamic)
 ======================= */
 const statusEl = document.getElementById("status");
 const solutionTextEl = document.getElementById("solutionText");
 
+// Create Autofill Counter Display
+const statsDiv = document.createElement("div");
+statsDiv.style.position = "absolute";
+statsDiv.style.bottom = "20px";
+statsDiv.style.left = "20px";
+statsDiv.style.color = "#00ff88";
+statsDiv.style.fontFamily = "Arial, sans-serif";
+statsDiv.style.fontSize = "18px";
+statsDiv.style.fontWeight = "bold";
+statsDiv.style.pointerEvents = "none";
+statsDiv.style.textShadow = "0 0 5px black";
+statsDiv.innerText = "Autofilled: 0";
+document.body.appendChild(statsDiv);
+
+/* =======================
+   WORKER SETUP
+======================= */
 statusEl.innerText = "Loading engine…";
 statusEl.style.color = "orange";
 
@@ -81,28 +101,29 @@ solverWorker.onmessage = (e) => {
              return;
         }
 
-        // --- SPLIT 180 MOVES (U2 -> U U) ---
+        // --- SPLIT 180 MOVES ---
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
         
         rawMoves.forEach(move => {
             if (move.includes("2")) {
                 let base = move.replace("2", "");
-                solutionMoves.push(base); // First turn
-                solutionMoves.push(base); // Second turn
+                solutionMoves.push(base); 
+                solutionMoves.push(base); 
             } else {
                 solutionMoves.push(move);
             }
         });
         
-        // Prepare UI
         moveIndex = 0;
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
         
-        // Calculate visual moves based on current camera angle
         updateDisplayMoves();
         updateStepStatus();
+        
+        // Hide hint when solved
+        if(hintBox) hintBox.visible = false;
     }
     if (d.type === "error") {
         statusEl.innerText = "Invalid Configuration";
@@ -122,7 +143,7 @@ function init() {
     scene.background = new THREE.Color(0x111111);
 
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-    // Flat view (Z-axis only)
+    // Flat view
     camera.position.set(0, 0, 16); 
     camera.lookAt(0, 0, 0);
 
@@ -145,9 +166,16 @@ function init() {
     pivotGroup = new THREE.Group();
     scene.add(pivotGroup);
 
+    // Create Hint Box (Wireframe)
+    const boxGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05); // Slightly larger than cube
+    const boxEdges = new THREE.EdgesGeometry(boxGeo);
+    // Magenta color for high visibility
+    hintBox = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 2 }));
+    hintBox.visible = false;
+    pivotGroup.add(hintBox);
+
     createCube();
     
-    // Initial tilt so it looks 3D, but user can drag to flat
     pivotGroup.rotation.x = 0.5;
     pivotGroup.rotation.y = -0.6;
 
@@ -162,9 +190,12 @@ function init() {
 }
 
 function createCube() {
-    while(pivotGroup.children.length > 0){ 
-        pivotGroup.remove(pivotGroup.children[0]); 
-    }
+    // Clear existing cubes but keep hintBox
+    const children = [...pivotGroup.children];
+    children.forEach(c => {
+        if(c !== hintBox) pivotGroup.remove(c);
+    });
+
     cubes = [];
     const geo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
 
@@ -234,10 +265,15 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 function runLogicalAutofill() {
     let loopChanges = true;
     let iteration = 0;
+    
+    // We analyze pieces to find hints later
+    let boardAnalysis = []; 
+
     while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
-        let boardPieces = []; 
+        
+        boardAnalysis = []; // Reset analysis each loop
 
         const getExposedFaces = (c) => {
             const x = Math.round(c.position.x);
@@ -266,7 +302,7 @@ function runLogicalAutofill() {
             const faces = getExposedFaces(c);
             if(faces.length === 0) return;
             const paintedColors = faces.map(f => f.color).filter(c => c !== null);
-            boardPieces.push({
+            boardAnalysis.push({
                 obj: c, type: faces.length === 3 ? 'corner' : 'edge',
                 faces: faces, painted: paintedColors,
                 isComplete: paintedColors.length === faces.length
@@ -276,7 +312,7 @@ function runLogicalAutofill() {
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
-        boardPieces.forEach(p => {
+        boardAnalysis.forEach(p => {
             if (p.isComplete) {
                 const set = new Set(p.painted);
                 if(p.type === 'corner') {
@@ -289,31 +325,41 @@ function runLogicalAutofill() {
             }
         });
 
-        boardPieces.forEach(p => {
+        // Forward Logic
+        boardAnalysis.forEach(p => {
             if (p.isComplete || p.painted.length === 0) return; 
             let candidates = [];
             if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
             else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
+            
+            // Store candidate count for hint logic
+            p.candidateCount = candidates.length; 
+
             if (candidates.length === 1) {
                 if(fillPiece(p, candidates[0])) loopChanges = true;
             }
         });
 
+        // Reverse Logic
         if (!loopChanges) {
             availableCorners.forEach(cand => {
-                const compatiblePieces = boardPieces.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
+                const compatiblePieces = boardAnalysis.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
                 if (compatiblePieces.length === 1) {
                     if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
                 }
             });
             availableEdges.forEach(cand => {
-                const compatiblePieces = boardPieces.filter(p => p.type === 'edge' && !p.isComplete && p.painted.every(col => cand.includes(col)));
+                const compatiblePieces = boardAnalysis.filter(p => p.type === 'edge' && !p.isComplete && p.painted.every(col => cand.includes(col)));
                 if (compatiblePieces.length === 1) {
                     if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
                 }
             });
         }
     }
+    
+    // Logic Done. If stuck, calculate Hint.
+    calculateHint(boardAnalysis);
+
     if(iteration > 1) updatePaletteCounts();
 }
 
@@ -326,10 +372,45 @@ function fillPiece(p, candidateColors) {
             f.mat.color.setHex(colors[fill]);
             f.mat.needsUpdate = true;
             filledSomething = true;
+            
+            // Increment Autofill Counter
+            autofillCount++;
+            statsDiv.innerText = "Autofilled: " + autofillCount;
         }
     });
     return filledSomething;
 }
+
+/* =======================
+   HINT SYSTEM (BLINKING BORDER)
+======================= */
+function calculateHint(boardPieces) {
+    // 1. Filter pieces that are started but not finished
+    let possibleHints = boardPieces.filter(p => !p.isComplete && p.painted.length > 0);
+    
+    // 2. Sort by "Fewest Candidates" (Lowest Entropy)
+    // We prefer a piece that has only 2 options over one that has 5.
+    possibleHints.sort((a, b) => {
+        // If candidateCount wasn't set, treat as high
+        let ca = a.candidateCount || 99;
+        let cb = b.candidateCount || 99;
+        return ca - cb;
+    });
+
+    if (possibleHints.length > 0) {
+        // We found a good candidate
+        const bestPiece = possibleHints[0];
+        
+        // Move the hint wireframe to this cube's position
+        hintBox.position.copy(bestPiece.obj.position);
+        hintBox.quaternion.copy(bestPiece.obj.quaternion);
+        hintBox.visible = true;
+    } else {
+        // No hints (either empty board or full board)
+        hintBox.visible = false;
+    }
+}
+
 
 /* =======================
    INTERACTION
@@ -349,10 +430,14 @@ function handlePaint(clientX, clientY) {
              return;
         }
         const matIndex = hit.face.materialIndex;
-        obj.material[matIndex].color.setHex(colors[paintColor]);
-        obj.material[matIndex].needsUpdate = true;
-        runLogicalAutofill();
-        updatePaletteCounts();
+        
+        // Only update if color is actually changing
+        if (obj.material[matIndex].color.getHex() !== colors[paintColor]) {
+             obj.material[matIndex].color.setHex(colors[paintColor]);
+             obj.material[matIndex].needsUpdate = true;
+             runLogicalAutofill();
+             updatePaletteCounts();
+        }
     }
 }
 
@@ -367,6 +452,12 @@ function clearCube() {
     solutionTextEl.innerText = "";
     document.getElementById("action-controls").style.display = "flex";
     document.getElementById("playback-controls").style.display = "none";
+    
+    // Reset Stats & Hints
+    autofillCount = 0;
+    statsDiv.innerText = "Autofilled: 0";
+    hintBox.visible = false;
+
     updatePaletteCounts();
     statusEl.innerText = "Cube Cleared";
 }
@@ -374,19 +465,16 @@ function clearCube() {
 /* =======================
    ROTATION & VISUAL MAPPING
 ======================= */
-// Helper to convert Logical Move (e.g. U) to Visual Move (e.g. R) based on rotation
 function getVisualMove(move) {
     const face = move[0];
     const suffix = move.substring(1);
     
-    // Logical Axes
     const logicalAxes = {
         U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
         R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
         F: new THREE.Vector3(0, 0, 1), B: new THREE.Vector3(0, 0, -1)
     };
 
-    // View Axes (Camera is Z+)
     const viewAxes = {
         U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
         R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
@@ -394,7 +482,7 @@ function getVisualMove(move) {
     };
 
     const vec = logicalAxes[face].clone();
-    vec.applyQuaternion(pivotGroup.quaternion); // Convert to world space
+    vec.applyQuaternion(pivotGroup.quaternion); 
 
     let bestFace = face;
     let maxDot = -Infinity;
@@ -411,7 +499,6 @@ function getVisualMove(move) {
 
 function updateDisplayMoves() {
     displayMoves = solutionMoves.map(m => getVisualMove(m));
-    // Also update solution text to match
     if(displayMoves.length > 0) {
         solutionTextEl.innerText = "Visual: " + displayMoves.join(" ");
     }
@@ -462,6 +549,11 @@ function rotateFace(move, reverse=false, onComplete=null) {
             pivotGroup.remove(pivot);
             snapToGrid();
             isAnimating = false;
+            
+            // Re-calculate Hint because rotation moved things!
+            // We run a "dummy" autofill just to update positions for the hint
+            runLogicalAutofill(); 
+            
             if(onComplete) onComplete();
         }
     }
@@ -478,7 +570,6 @@ function scrambleCube() {
             statusEl.innerText = "Ready to Solve";
             return;
         }
-        // Scramble is fast, no gap
         rotateFace(moves[i++], false, nextMove);
     }
     nextMove();
@@ -513,12 +604,12 @@ function getCubeStateString() {
     const find = (x,y,z) => cubes.find(c => Math.round(c.position.x)===x && Math.round(c.position.y)===y && Math.round(c.position.z)===z);
 
     const faces = [
-        { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] }, // U
-        { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] }, // R
-        { norm: new THREE.Vector3(0,0,1), pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] }, // F
-        { norm: new THREE.Vector3(0,-1,0), pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] }, // D
-        { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] }, // L
-        { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] }  // B
+        { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] }, 
+        { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] }, 
+        { norm: new THREE.Vector3(0,0,1), pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] }, 
+        { norm: new THREE.Vector3(0,-1,0), pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] }, 
+        { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] }, 
+        { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] } 
     ];
 
     faces.forEach(f => {
@@ -567,10 +658,9 @@ function selectColor(el, c) {
 }
 
 /* =======================
-   CONTROLS (UPDATED FOR GAP & VISUALS)
+   CONTROLS
 ======================= */
 function updateStepStatus() {
-    // Show the VISUAL move (displayMoves), but use moveIndex based on logical moves
     const currentVisMove = moveIndex < displayMoves.length ? displayMoves[moveIndex] : "-";
     statusEl.innerHTML = `Move: <b>${currentVisMove}</b> (Step ${moveIndex+1}/${solutionMoves.length})`;
 }
@@ -578,17 +668,14 @@ function updateStepStatus() {
 function nextMove() {
     if (isAnimating || moveIndex >= solutionMoves.length) return;
     
-    // Check orientation before every move in case user rotated cube while paused
     updateDisplayMoves(); 
     updateStepStatus();
 
     rotateFace(solutionMoves[moveIndex], false, () => {
         moveIndex++;
         if(playInterval && moveIndex < solutionMoves.length) {
-            // Add GAP between moves
             setTimeout(nextMove, MOVE_GAP);
         } else {
-            // End of manual single step or end of list
             if(moveIndex >= solutionMoves.length) {
                 clearInterval(playInterval);
                 playInterval = null;
@@ -617,12 +704,8 @@ function togglePlay() {
         if(!solutionMoves.length) return;
         if(moveIndex >= solutionMoves.length) moveIndex = 0;
         if(btn) btn.innerText = "PAUSE";
-        
-        // Start loop
         nextMove();
-        
-        // Note: nextMove() recursively calls itself via setTimeout as long as playInterval is not null
-        playInterval = 1; // Flag to indicate playing
+        playInterval = 1; 
     }
 }
 
@@ -631,7 +714,7 @@ function resetCube() {
 }
 
 /* =======================
-   INPUT (UPDATED TO REFRESH TEXT ON DRAG)
+   INPUT
 ======================= */
 function onInputStart(e) {
     isMouseDown = true;
@@ -653,7 +736,6 @@ function onInputMove(e) {
         pivotGroup.rotation.y += dx * 0.006;
         pivotGroup.rotation.x += dy * 0.006;
         
-        // Update display text while dragging if solution exists
         if(solutionMoves.length > 0) {
             updateDisplayMoves();
             updateStepStatus();
@@ -680,5 +762,15 @@ function onInputEnd(e) {
 
 function animate() {
     requestAnimationFrame(animate);
+    
+    // Blinking effect for the hint box
+    if (hintBox && hintBox.visible) {
+        const time = Date.now() * 0.005; 
+        // Oscillate visible on/off or opacity?
+        // Wireframes don't support opacity well without transparent:true
+        // So we toggle visibility every 500ms
+        hintBox.visible = Math.floor(Date.now() / 500) % 2 === 0;
+    }
+
     renderer.render(scene, camera);
 }
