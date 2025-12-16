@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – UPDATED (Colors, Flat View, Split Moves)
+   RUBIK'S CUBE SOLVER – VISUAL AWARE & SMOOTH ANIMATION
    ========================================================= */
 
 /* =======================
@@ -8,14 +8,14 @@
 const colors = {
     U: 0xffffff, // White
     R: 0xb90000, // Red
-    F: 0x00ff00, // Green (Brighter/Lime Green per request)
+    F: 0x00ff00, // Green (Bright Lime)
     D: 0xffd500, // Yellow
-    L: 0xff3300, // Orange (Redder to distinguish from Yellow)
+    L: 0xff3300, // Orange (Red-Orange)
     B: 0x0051ba, // Blue
     Core: 0x202020 // Dark Grey (Internal)
 };
 
-// All 20 Valid Movable Pieces (Standard Scheme)
+// All 20 Valid Movable Pieces
 const ALL_CORNERS = [
     ["U","R","F"], ["U","F","L"], ["U","L","B"], ["U","B","R"],
     ["D","F","R"], ["D","L","F"], ["D","B","L"], ["D","R","B"]
@@ -27,8 +27,8 @@ const ALL_EDGES = [
 ];
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
-const PLAY_SPEED = 600; // Slightly faster since double moves take 2 steps now
-const SCRAMBLE_SPEED = 100; 
+const PLAY_SPEED = 400; // Speed of the rotation itself
+const MOVE_GAP = 300;   // Delay between moves (Gap)
 
 /* =======================
    GLOBAL STATE
@@ -40,7 +40,8 @@ let cubes = [], pivotGroup;
 let isAnimating = false;
 let paintColor = "U";
 
-let solutionMoves = [];
+let solutionMoves = []; // logical moves (for engine)
+let displayMoves = [];  // visual moves (for UI text)
 let moveIndex = 0;
 let playInterval = null;
 
@@ -80,7 +81,7 @@ solverWorker.onmessage = (e) => {
              return;
         }
 
-        // --- UPDATED: SPLIT 180 MOVES INTO 2 STEPS ---
+        // --- SPLIT 180 MOVES (U2 -> U U) ---
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
         
@@ -93,12 +94,14 @@ solverWorker.onmessage = (e) => {
                 solutionMoves.push(move);
             }
         });
-        // ---------------------------------------------
-
+        
+        // Prepare UI
         moveIndex = 0;
-        solutionTextEl.innerText = d.solution; // Display original solution text
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
+        
+        // Calculate visual moves based on current camera angle
+        updateDisplayMoves();
         updateStepStatus();
     }
     if (d.type === "error") {
@@ -119,8 +122,7 @@ function init() {
     scene.background = new THREE.Color(0x111111);
 
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-    
-    // --- UPDATED: FLAT VIEW (Camera on Z-axis only) ---
+    // Flat view (Z-axis only)
     camera.position.set(0, 0, 16); 
     camera.lookAt(0, 0, 0);
 
@@ -145,13 +147,9 @@ function init() {
 
     createCube();
     
-    // Reset initial rotation so it appears flat initially
-    pivotGroup.rotation.x = 0.5; // Slight tilt to see top (optional, set to 0 for perfectly flat)
-    pivotGroup.rotation.y = -0.6; // Slight tilt to see side (optional, set to 0 for perfectly flat)
-    
-    // If you want it PERFECTLY flat on load, uncomment these:
-    // pivotGroup.rotation.x = 0;
-    // pivotGroup.rotation.y = 0;
+    // Initial tilt so it looks 3D, but user can drag to flat
+    pivotGroup.rotation.x = 0.5;
+    pivotGroup.rotation.y = -0.6;
 
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
@@ -193,7 +191,7 @@ function createCube() {
 }
 
 /* =======================
-   HELPERS
+   HELPERS & LOGIC
 ======================= */
 function getColorKey(hex) {
     for (const k in colors) {
@@ -231,18 +229,14 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 }
 
 /* =======================
-   RECURSIVE LOGICAL FILL (FORWARD + REVERSE)
+   RECURSIVE LOGICAL FILL
 ======================= */
 function runLogicalAutofill() {
     let loopChanges = true;
     let iteration = 0;
-
-    // Loop until deductions stabilize
     while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
-
-        // 1. Snapshot: Get state of all 20 movable pieces
         let boardPieces = []; 
 
         const getExposedFaces = (c) => {
@@ -271,18 +265,14 @@ function runLogicalAutofill() {
             if(c.userData.isCenter) return;
             const faces = getExposedFaces(c);
             if(faces.length === 0) return;
-            
             const paintedColors = faces.map(f => f.color).filter(c => c !== null);
             boardPieces.push({
-                obj: c,
-                type: faces.length === 3 ? 'corner' : 'edge',
-                faces: faces,
-                painted: paintedColors,
+                obj: c, type: faces.length === 3 ? 'corner' : 'edge',
+                faces: faces, painted: paintedColors,
                 isComplete: paintedColors.length === faces.length
             });
         });
 
-        // 2. Inventory: Remove pieces that are already fully painted/identified
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
@@ -290,70 +280,47 @@ function runLogicalAutofill() {
             if (p.isComplete) {
                 const set = new Set(p.painted);
                 if(p.type === 'corner') {
-                    // Remove matching corner from inventory
                     const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
                     if(idx !== -1) availableCorners.splice(idx, 1);
                 } else {
-                    // Remove matching edge
                     const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
                     if(idx !== -1) availableEdges.splice(idx, 1);
                 }
             }
         });
 
-        // 3. LOGIC A: FORWARD DEDUCTION
         boardPieces.forEach(p => {
-            if (p.isComplete) return; 
-            if (p.painted.length === 0) return; 
-
+            if (p.isComplete || p.painted.length === 0) return; 
             let candidates = [];
             if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
             else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
-
             if (candidates.length === 1) {
                 if(fillPiece(p, candidates[0])) loopChanges = true;
             }
         });
 
-        // 4. LOGIC B: REVERSE DEDUCTION (INVERSE)
         if (!loopChanges) {
-            // Check remaining Corners
             availableCorners.forEach(cand => {
-                const compatiblePieces = boardPieces.filter(p => 
-                    p.type === 'corner' && 
-                    !p.isComplete && 
-                    p.painted.every(col => cand.includes(col))
-                );
-
+                const compatiblePieces = boardPieces.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
                 if (compatiblePieces.length === 1) {
                     if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
                 }
             });
-
-            // Check remaining Edges
             availableEdges.forEach(cand => {
-                const compatiblePieces = boardPieces.filter(p => 
-                    p.type === 'edge' && 
-                    !p.isComplete && 
-                    p.painted.every(col => cand.includes(col))
-                );
-
+                const compatiblePieces = boardPieces.filter(p => p.type === 'edge' && !p.isComplete && p.painted.every(col => cand.includes(col)));
                 if (compatiblePieces.length === 1) {
                     if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
                 }
             });
         }
     }
-    
     if(iteration > 1) updatePaletteCounts();
 }
 
 function fillPiece(p, candidateColors) {
     let filledSomething = false;
     const missing = candidateColors.filter(c => !p.painted.includes(c));
-    
     p.faces.forEach(f => {
-        // Only fill if empty (Null) to protect manual input
         if (f.color === null && missing.length > 0) {
             const fill = missing.shift(); 
             f.mat.color.setHex(colors[fill]);
@@ -364,36 +331,26 @@ function fillPiece(p, candidateColors) {
     return filledSomething;
 }
 
-
 /* =======================
    INTERACTION
 ======================= */
 function handlePaint(clientX, clientY) {
     if (isAnimating) return;
-
     mouse.x = (clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(cubes);
 
     if (intersects.length > 0) {
         const hit = intersects[0];
         const obj = hit.object;
-        
         if (obj.userData.isCenter) {
              statusEl.innerText = "Centers are fixed!";
              return;
         }
-
         const matIndex = hit.face.materialIndex;
-        const mat = obj.material[matIndex];
-        
-        // Manual Paint
-        mat.color.setHex(colors[paintColor]);
-        mat.needsUpdate = true;
-        
-        // Run Logic
+        obj.material[matIndex].color.setHex(colors[paintColor]);
+        obj.material[matIndex].needsUpdate = true;
         runLogicalAutofill();
         updatePaletteCounts();
     }
@@ -402,16 +359,11 @@ function handlePaint(clientX, clientY) {
 function clearCube() {
     if(isAnimating) return;
     if(!confirm("Clear all colors? Centers will remain.")) return;
-
     cubes.forEach(c => {
         if(!c.userData.isCenter) {
-             c.material.forEach(m => {
-                 m.color.setHex(colors.Core); // Reset to Grey
-                 m.needsUpdate = true;
-             });
+             c.material.forEach(m => { m.color.setHex(colors.Core); m.needsUpdate = true; });
         }
     });
-    
     solutionTextEl.innerText = "";
     document.getElementById("action-controls").style.display = "flex";
     document.getElementById("playback-controls").style.display = "none";
@@ -420,21 +372,58 @@ function clearCube() {
 }
 
 /* =======================
-   ROTATION & SOLVER
+   ROTATION & VISUAL MAPPING
 ======================= */
+// Helper to convert Logical Move (e.g. U) to Visual Move (e.g. R) based on rotation
+function getVisualMove(move) {
+    const face = move[0];
+    const suffix = move.substring(1);
+    
+    // Logical Axes
+    const logicalAxes = {
+        U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
+        R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
+        F: new THREE.Vector3(0, 0, 1), B: new THREE.Vector3(0, 0, -1)
+    };
+
+    // View Axes (Camera is Z+)
+    const viewAxes = {
+        U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
+        R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
+        F: new THREE.Vector3(0, 0, 1), B: new THREE.Vector3(0, 0, -1)
+    };
+
+    const vec = logicalAxes[face].clone();
+    vec.applyQuaternion(pivotGroup.quaternion); // Convert to world space
+
+    let bestFace = face;
+    let maxDot = -Infinity;
+
+    for(const [k, v] of Object.entries(viewAxes)) {
+        const dot = vec.dot(v);
+        if(dot > maxDot) {
+            maxDot = dot;
+            bestFace = k;
+        }
+    }
+    return bestFace + suffix;
+}
+
+function updateDisplayMoves() {
+    displayMoves = solutionMoves.map(m => getVisualMove(m));
+    // Also update solution text to match
+    if(displayMoves.length > 0) {
+        solutionTextEl.innerText = "Visual: " + displayMoves.join(" ");
+    }
+}
+
 function rotateFace(move, reverse=false, onComplete=null) {
     if (isAnimating && !onComplete) return;
     isAnimating = true;
 
     let face = move[0];
     let prime = move.includes("'");
-    let twice = move.includes("2");
     if (reverse) prime = !prime;
-    
-    // Logic note: Since we split 180 moves into 2 steps in the solution array,
-    // "twice" (e.g. U2) will rarely happen during SOLVE playback, 
-    // but might still happen during random Scramble.
-    
     let dir = prime ? 1 : -1;
     let axis = "y"; 
     let group = [];
@@ -454,13 +443,12 @@ function rotateFace(move, reverse=false, onComplete=null) {
     pivotGroup.add(pivot);
     group.forEach(c => pivot.attach(c));
 
-    const targetAngle = (twice ? Math.PI : Math.PI/2) * dir;
-    const speed = onComplete ? SCRAMBLE_SPEED : PLAY_SPEED; 
+    const targetAngle = (Math.PI/2) * dir;
     const start = Date.now();
 
     function step(){
         const now = Date.now();
-        let p = (now - start) / speed;
+        let p = (now - start) / PLAY_SPEED;
         if(p > 1) p = 1;
         const ease = p * (2 - p);
         pivot.rotation[axis] = targetAngle * ease;
@@ -490,6 +478,7 @@ function scrambleCube() {
             statusEl.innerText = "Ready to Solve";
             return;
         }
+        // Scramble is fast, no gap
         rotateFace(moves[i++], false, nextMove);
     }
     nextMove();
@@ -578,24 +567,44 @@ function selectColor(el, c) {
 }
 
 /* =======================
-   CONTROLS
+   CONTROLS (UPDATED FOR GAP & VISUALS)
 ======================= */
 function updateStepStatus() {
-    statusEl.innerHTML = `Step ${moveIndex} / ${solutionMoves.length}`;
+    // Show the VISUAL move (displayMoves), but use moveIndex based on logical moves
+    const currentVisMove = moveIndex < displayMoves.length ? displayMoves[moveIndex] : "-";
+    statusEl.innerHTML = `Move: <b>${currentVisMove}</b> (Step ${moveIndex+1}/${solutionMoves.length})`;
 }
 
 function nextMove() {
     if (isAnimating || moveIndex >= solutionMoves.length) return;
-    rotateFace(solutionMoves[moveIndex]);
-    moveIndex++;
+    
+    // Check orientation before every move in case user rotated cube while paused
+    updateDisplayMoves(); 
     updateStepStatus();
+
+    rotateFace(solutionMoves[moveIndex], false, () => {
+        moveIndex++;
+        if(playInterval && moveIndex < solutionMoves.length) {
+            // Add GAP between moves
+            setTimeout(nextMove, MOVE_GAP);
+        } else {
+            // End of manual single step or end of list
+            if(moveIndex >= solutionMoves.length) {
+                clearInterval(playInterval);
+                playInterval = null;
+                document.getElementById("playPauseBtn").innerText = "PLAY";
+                statusEl.innerText = "Solved!";
+            }
+        }
+    });
 }
 
 function prevMove() {
     if (isAnimating || moveIndex <= 0) return;
     moveIndex--;
-    rotateFace(solutionMoves[moveIndex], true);
+    updateDisplayMoves();
     updateStepStatus();
+    rotateFace(solutionMoves[moveIndex], true);
 }
 
 function togglePlay() {
@@ -608,17 +617,12 @@ function togglePlay() {
         if(!solutionMoves.length) return;
         if(moveIndex >= solutionMoves.length) moveIndex = 0;
         if(btn) btn.innerText = "PAUSE";
-        playInterval = setInterval(() => {
-            if(!isAnimating){
-                if(moveIndex < solutionMoves.length) nextMove();
-                else {
-                    clearInterval(playInterval);
-                    playInterval = null;
-                    if(btn) btn.innerText = "PLAY";
-                    statusEl.innerText = "Solved!";
-                }
-            }
-        }, PLAY_SPEED);
+        
+        // Start loop
+        nextMove();
+        
+        // Note: nextMove() recursively calls itself via setTimeout as long as playInterval is not null
+        playInterval = 1; // Flag to indicate playing
     }
 }
 
@@ -627,7 +631,7 @@ function resetCube() {
 }
 
 /* =======================
-   INPUT
+   INPUT (UPDATED TO REFRESH TEXT ON DRAG)
 ======================= */
 function onInputStart(e) {
     isMouseDown = true;
@@ -648,6 +652,12 @@ function onInputMove(e) {
     if (isDragging) {
         pivotGroup.rotation.y += dx * 0.006;
         pivotGroup.rotation.x += dy * 0.006;
+        
+        // Update display text while dragging if solution exists
+        if(solutionMoves.length > 0) {
+            updateDisplayMoves();
+            updateStepStatus();
+        }
     }
     lastMouse = { x: cx, y: cy };
 }
