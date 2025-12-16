@@ -28,7 +28,7 @@ const ALL_EDGES = [
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
 const PLAY_SPEED = 400; // Speed of the rotation itself
-const MOVE_GAP = 300;   // Delay between moves (Gap)
+const MOVE_GAP = 800;   // Delay between moves (Gap)
 
 /* =======================
    GLOBAL STATE
