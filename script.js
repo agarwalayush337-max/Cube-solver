@@ -1,38 +1,30 @@
-/* =============================================================================
-   RUBIK'S CUBE SOLVER – PERFECT UX EDITION
-   Features: 
-   1. Landing = Solved Cube. Scanning = Ghost Cube.
-   2. "Any Start" Logic (Centers are hidden until scanned).
-   3. Split-Screen with resizing fixes.
-   4. Slow-Motion Visual Guide.
-   ============================================================================= */
+/* =========================================================
+   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION
+   ========================================================= */
 
-/* =============================================================================
-   SECTION 1: CONFIGURATION
-   ============================================================================= */
-
+/* =======================
+   CONFIG & CONSTANTS
+======================= */
 const colors = {
     U: 0xffffff, // White
     R: 0xb90000, // Red
     F: 0x00ff00, // Green
     D: 0xffd500, // Yellow
-    L: 0xff4500, // Orange
+    L: 0xff3300, // Orange
     B: 0x0051ba, // Blue
-    Core: 0x202020, 
-    Ghost: 0x555555 // Grey for unfilled faces
+    Core: 0x202020 
 };
 
 const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// HSL Rules (Strict White/Orange separation)
+// HSL RANGES (Adjusted for real-world lighting)
 const hslRules = {
-    white:  { sMax: 20, lMin: 35 }, 
-    orange: { hMin: 11,  hMax: 43, sMin: 55 }, 
-    yellow: { hMin: 44,  hMax: 75 }, 
-    green:  { hMin: 76,  hMax: 155 },
+    white:  { sMax: 15, lMin: 40 }, 
+    orange: { hMin: 10, hMax: 45 }, 
+    yellow: { hMin: 46, hMax: 75 }, 
+    green:  { hMin: 76, hMax: 155 },
     blue:   { hMin: 156, hMax: 260 },
-    red1:   { hMin: 330, hMax: 360 },
-    red2:   { hMin: 0,   hMax: 10 }
+    red:    { hMin: 330, hMax: 10 } 
 };
 
 const ALL_CORNERS = [
@@ -47,166 +39,180 @@ const ALL_EDGES = [
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
 const PLAY_SPEED = 400; 
-const ANIMATION_SPEED = 2000; // 2 seconds slow rotation
+const MOVE_GAP = 300;   
 
-/* =============================================================================
-   SECTION 2: GLOBAL STATE
-   ============================================================================= */
-
+/* =======================
+   GLOBAL STATE
+======================= */
 let scene, camera, renderer;
-let cubes = [], pivotGroup; 
+let raycaster, mouse;
+let cubes = [], pivotGroup;
 let hintBox; 
 
 let isAnimating = false;
 let paintColor = "U";
 
 let solutionMoves = []; 
+let displayMoves = [];  
 let moveIndex = 0;
 let playInterval = null;
 let autofillCount = 0; 
 
+let isMouseDown = false;
+let isDragging = false;
+let startMouse = { x: 0, y: 0 };
+let lastMouse = { x: 0, y: 0 };
+
 // Camera State
 let videoStream = null;
 let isCameraActive = false;
-let scanIndex = 0; 
-let scannedFacesData = []; 
+let scanIndex = 0;
+let isMirrored = false; 
+let scannedFacesData = [];
 
-// Rotation Guide Sequence
-// We use relative rotations. 
-const scanSequence = [
-    { action: "Start: Scan Face 1", rot: {x:0.5, y:-0.6} }, // Isometric start
-    { action: "Rotate Cube LEFT", rot: {x:0.5, y:-0.6 - (Math.PI/2)} }, 
-    { action: "Rotate Cube LEFT", rot: {x:0.5, y:-0.6 - (Math.PI)} },    
-    { action: "Rotate Cube LEFT", rot: {x:0.5, y:-0.6 - (Math.PI*1.5)} },
-    { action: "Rotate Cube DOWN (Top)", rot: {x:0.5 + (Math.PI/2), y:-0.6} }, 
-    { action: "Rotate Cube UP (Bottom)", rot: {x:0.5 - (Math.PI/2), y:-0.6} } 
-];
+/* =======================
+   UI ELEMENTS
+======================= */
+const statusEl = document.getElementById("status");
+const solutionTextEl = document.getElementById("solutionText");
 
-/* =============================================================================
-   SECTION 3: UI INJECTION
-   ============================================================================= */
+// Stats
+const statsDiv = document.createElement("div");
+statsDiv.style.position = "absolute";
+statsDiv.style.bottom = "20px";
+statsDiv.style.left = "20px";
+statsDiv.style.color = "#00ff88";
+statsDiv.style.fontFamily = "Arial, sans-serif";
+statsDiv.style.fontSize = "18px";
+statsDiv.style.fontWeight = "bold";
+statsDiv.style.pointerEvents = "none";
+statsDiv.style.textShadow = "0 0 5px black";
+statsDiv.innerText = "Autofilled: 0";
+document.body.appendChild(statsDiv);
 
-const styleCSS = document.createElement("style");
-styleCSS.innerHTML = `
-    #scanner-ui {
-        position: absolute; top: 0; left: 0; width: 100%; height: 50%;
-        background: #111; z-index: 50; display: none;
-        flex-direction: column; align-items: center; justify-content: center;
-        border-bottom: 4px solid #00ff00;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.8);
-    }
-    
-    /* When Camera is Active, 3D Canvas moves to bottom half */
-    #canvas-container {
-        width: 100vw; height: 100vh;
-        transition: height 0.5s, top 0.5s;
-        position: absolute; top: 0; left: 0;
-    }
-    .cam-active #canvas-container {
-        height: 50% !important;
-        top: 50% !important;
-    }
-
-    .cam-dot {
-        width: 40px; height: 40px; border-radius: 8px;
-        border: 2px solid rgba(255,255,255,0.9); 
-        box-shadow: 0 2px 10px rgba(0,0,0,0.8);
-        cursor: pointer; transition: transform 0.1s;
-    }
-    .cam-dot:active { transform: scale(0.9); }
-
-    #guide-text {
-        position: absolute; bottom: 10px; width: 100%; text-align: center;
-        color: #00ff00; font-size: 20px; font-weight: bold; 
-        text-shadow: 0 2px 4px #000;
-        pointer-events: none; z-index: 60;
-        background: rgba(0,0,0,0.7); padding: 8px 0;
-    }
-    
-    #cam-msg {
-        position: absolute; top: 10px; left: 10px; 
-        color: #fff; font-size: 14px;
-        background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 20px;
-    }
-`;
-document.head.appendChild(styleCSS);
-
-const scannerUI = document.createElement("div");
-scannerUI.id = "scanner-ui";
-scannerUI.innerHTML = `
-    <div style="position:relative; width:100%; height:100%; overflow:hidden; display:flex; justify-content:center; background:#000;">
-        <video id="cam-video" autoplay playsinline style="height:100%; width:auto; opacity:0.9;"></video>
-        <canvas id="cam-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; display:none;"></canvas>
-        <div id="grid-overlay" style="
-            position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); 
-            width:260px; height:260px; 
-            display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; 
-            border: 2px solid rgba(255,255,255,0.2); border-radius: 12px;">
-        </div>
-    </div>
-    <div style="position:absolute; bottom:15px; right:15px; display:flex; gap:10px;">
-        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:15px 40px; font-weight:bold; font-size:18px; border-radius:50px; border:none;">CAPTURE</button>
-    </div>
-    <button id="btn-close" style="position:absolute; top:15px; right:15px; background:#ff3300; color:white; border:none; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer;">EXIT</button>
-    <div id="cam-msg">Tap dots to fix</div>
-    <div id="guide-text">Scan Face 1</div>
-`;
-document.body.appendChild(scannerUI);
-
-const videoEl = document.getElementById("cam-video");
-const canvasEl = document.getElementById("cam-canvas");
-const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
-const gridEl = document.getElementById("grid-overlay");
-const guideText = document.getElementById("guide-text");
-
-// Tool Row Injection
+// Camera Button
 const toolRow = document.getElementById("tool-row");
 if(toolRow) {
     const camBtn = document.createElement("button");
     camBtn.innerText = "📷 SCAN CUBE";
     camBtn.className = "tool-btn";
     camBtn.style.background = "#0051ba";
-    camBtn.style.marginLeft = "10px";
     camBtn.onclick = startCameraMode;
     toolRow.appendChild(camBtn);
 }
 
-// Generate Grid Dots
+// ---------------------------------------------------------
+// CSS 3D CUBE FOR VISUAL GUIDE
+// ---------------------------------------------------------
+const guideStyle = document.createElement("style");
+guideStyle.innerHTML = `
+    .scene-3d { perspective: 600px; width: 80px; height: 80px; position:absolute; top:20px; right:20px; z-index:200; }
+    .cube-3d { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 0.6s ease-in-out; }
+    .face-3d { position: absolute; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border: 2px solid #fff; display:flex; align-items:center; justify-content:center; font-weight:bold; color:white; font-size:12px;}
+    .face-front  { transform: rotateY(  0deg) translateZ(40px); background:rgba(0,255,0,0.2); }
+    .face-right  { transform: rotateY( 90deg) translateZ(40px); background:rgba(255,0,0,0.2); }
+    .face-back   { transform: rotateY(180deg) translateZ(40px); background:rgba(0,0,255,0.2); }
+    .face-left   { transform: rotateY(-90deg) translateZ(40px); background:rgba(255,100,0,0.2); }
+    .face-top    { transform: rotateX( 90deg) translateZ(40px); background:rgba(255,255,255,0.2); }
+    .face-bottom { transform: rotateX(-90deg) translateZ(40px); background:rgba(255,255,0,0.2); }
+`;
+document.head.appendChild(guideStyle);
+
+// Camera Overlay
+const camOverlay = document.createElement("div");
+camOverlay.id = "cam-overlay";
+Object.assign(camOverlay.style, {
+    position: 'absolute', top:0, left:0, width:'100%', height:'100%',
+    background: 'rgba(0,0,0,0.95)', zIndex: 100, display: 'none',
+    flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
+});
+
+camOverlay.innerHTML = `
+    <h2 id="cam-step" style="color:white; margin:0; font-size:24px;">Start with ANY Face</h2>
+    <div id="cam-sub" style="color:#aaa; font-size:14px; margin-bottom:10px;">Tap dots to fix colors manually</div>
+    
+    <div class="scene-3d">
+        <div class="cube-3d" id="guide-cube">
+            <div class="face-3d face-front">1</div>
+            <div class="face-3d face-right">2</div>
+            <div class="face-3d face-back">3</div>
+            <div class="face-3d face-left">4</div>
+            <div class="face-3d face-top">5</div>
+            <div class="face-3d face-bottom">6</div>
+        </div>
+    </div>
+
+    <div style="position:relative; width:300px; height:300px;">
+        <div style="position:relative; width:100%; height:100%; border:3px solid #fff; border-radius:8px; overflow:hidden;">
+            <video id="cam-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
+            <canvas id="cam-canvas" width="300" height="300" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
+            <div id="grid-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr;"></div>
+        </div>
+    </div>
+
+    <div style="margin-top:20px; display:flex; gap:15px;">
+        <button id="btn-mirror" class="tool-btn" style="padding:10px;">Flip Mirror</button>
+        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:12px 30px; font-weight:bold; font-size:16px;">CAPTURE</button>
+        <button id="btn-close-cam" class="tool-btn" style="background:#ff3300; padding:10px;">CANCEL</button>
+    </div>
+`;
+document.body.appendChild(camOverlay);
+
+const videoEl = document.getElementById("cam-video");
+const canvasEl = document.getElementById("cam-canvas");
+const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
+const gridEl = document.getElementById("grid-overlay");
+const camStep = document.getElementById("cam-step");
+const camSub = document.getElementById("cam-sub");
+const guideCube = document.getElementById("guide-cube");
+
+// Fill Grid
 for(let i=0; i<9; i++) {
     let cell = document.createElement("div");
-    cell.style.display="flex"; cell.style.alignItems="center"; cell.style.justifyContent="center";
+    cell.style.display = "flex";
+    cell.style.alignItems = "center";
+    cell.style.justifyContent = "center";
+    cell.style.pointerEvents = "auto";
+    
     let dot = document.createElement("div");
     dot.className = "cam-dot";
-    dot.onclick = (e) => {
-        e.stopPropagation();
+    dot.style.width = "35px";
+    dot.style.height = "35px";
+    dot.style.borderRadius = "8px";
+    dot.style.background = "transparent";
+    dot.style.border = "2px solid rgba(255,255,255,0.8)";
+    dot.style.boxShadow = "0 0 5px rgba(0,0,0,0.8)";
+    dot.style.cursor = "pointer";
+    
+    // Tap to fix logic
+    dot.onclick = function() {
         const current = dot.dataset.color || 'U';
         let idx = colorKeys.indexOf(current);
-        idx = (idx + 1) % colorKeys.length; 
+        idx = (idx + 1) % colorKeys.length;
         const next = colorKeys[idx];
         dot.style.backgroundColor = hexToString(colors[next]);
         dot.dataset.color = next;
         dot.dataset.manual = "true"; 
     };
+    
     cell.appendChild(dot);
     gridEl.appendChild(cell);
 }
 
+// Camera Events
+document.getElementById("btn-mirror").onclick = () => {
+    isMirrored = !isMirrored;
+    videoEl.style.transform = isMirrored ? "scaleX(-1)" : "none";
+};
+document.getElementById("btn-close-cam").onclick = stopCameraMode;
 document.getElementById("btn-capture").onclick = captureFace;
-document.getElementById("btn-close").onclick = stopCameraMode;
 
-/* =============================================================================
-   SECTION 4: WORKER SETUP
-   ============================================================================= */
-const statusEl = document.getElementById("status");
-const solutionTextEl = document.getElementById("solutionText");
-const statsDiv = document.createElement("div"); 
-Object.assign(statsDiv.style, {
-    position: 'absolute', bottom: '20px', left: '20px',
-    color: '#00ff88', fontFamily: 'Arial', fontSize: '18px',
-    fontWeight: 'bold', pointerEvents: 'none', textShadow: '0 0 5px black'
-});
-statsDiv.innerText = "Autofilled: 0";
-document.body.appendChild(statsDiv);
+
+/* =======================
+   WORKER SETUP
+======================= */
+statusEl.innerText = "Loading engine…";
+statusEl.style.color = "orange";
 
 const solverWorker = new Worker("worker.js?v=" + Date.now());
 let engineReady = false;
@@ -215,51 +221,63 @@ solverWorker.onmessage = (e) => {
     const d = e.data;
     if (d.type === "ready") {
         engineReady = true;
-        statusEl.innerText = "Ready!";
+        statusEl.innerText = "Ready! Paint, Scan or Scramble.";
         statusEl.style.color = "#00ff00";
     }
     if (d.type === "solution") {
         if (!d.solution || d.solution.startsWith("Error")) {
-            statusEl.innerText = "Unsolvable Pattern!";
+            statusEl.innerText = "Unsolvable! Check for duplicate colors.";
             statusEl.style.color = "red";
             return;
         }
+        if (d.solution.trim() === "") {
+             statusEl.innerText = "Cube is already solved!";
+             statusEl.style.color = "#00ff88";
+             return;
+        }
+
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
-        rawMoves.forEach(m => {
-            if (m.includes("2")) {
-                let base = m.replace("2", ""); solutionMoves.push(base); solutionMoves.push(base); 
-            } else solutionMoves.push(m);
+        rawMoves.forEach(move => {
+            if (move.includes("2")) {
+                let base = move.replace("2", "");
+                solutionMoves.push(base); solutionMoves.push(base); 
+            } else {
+                solutionMoves.push(move);
+            }
         });
+        
         moveIndex = 0;
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
+        updateDisplayMoves();
         updateStepStatus();
         if(hintBox) hintBox.visible = false;
-        statusEl.innerText = "Solution Ready!";
+    }
+    if (d.type === "error") {
+        statusEl.innerText = "Invalid Configuration";
+        statusEl.style.color = "red";
+        alert("Solver Error: " + d.message);
     }
 };
 
-/* =============================================================================
-   SECTION 5: 3D SCENE
-   ============================================================================= */
+/* =======================
+   INIT SCENE
+======================= */
 init();
 animate();
 
 function init() {
-    const container = document.getElementById("canvas-container");
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111);
-
-    camera = new THREE.PerspectiveCamera(30, container.clientWidth / container.clientHeight, 0.1, 100);
-    // Adjusted Camera Z for better fit in split screen
-    camera.position.set(0, 0, 18); 
+    camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 16); 
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
+    document.getElementById("canvas-container").appendChild(renderer.domElement);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dl = new THREE.DirectionalLight(0xffffff, 1);
@@ -275,448 +293,291 @@ function init() {
     pivotGroup = new THREE.Group();
     scene.add(pivotGroup);
 
-    // Hint Box
     const boxGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05); 
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
     hintBox = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 2 }));
     hintBox.visible = false;
     pivotGroup.add(hintBox);
 
-    // LANDING: Create SOLVED Cube
-    createCube(true);
+    createCube();
     
-    // Initial Orientation (Isometric)
     pivotGroup.rotation.x = 0.5;
     pivotGroup.rotation.y = -0.6;
 
-    window.addEventListener('resize', onWindowResize);
-    
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
     document.addEventListener("mouseup", onInputEnd);
     document.addEventListener("touchstart", onInputStart, { passive: false });
     document.addEventListener("touchmove", onInputMove, { passive: false });
     document.addEventListener("touchend", onInputEnd);
+
+    updatePaletteCounts();
 }
 
-function onWindowResize() {
-    const container = document.getElementById("canvas-container");
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    renderer.setSize(w, h);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-}
-
-function createCube(isSolved = true) {
-    // Clear existing
-    while(pivotGroup.children.length > 0) {
-        if(pivotGroup.children[0] !== hintBox) pivotGroup.remove(pivotGroup.children[0]);
-        else pivotGroup.children.shift(); 
-    }
-    pivotGroup.add(hintBox);
+function createCube() {
+    const children = [...pivotGroup.children];
+    children.forEach(c => {
+        if(c !== hintBox) pivotGroup.remove(c);
+    });
 
     cubes = [];
     const geo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
 
     for (let x = -1; x <= 1; x++)
-    for (let y = -1; y <= 1; y++)
-    for (let z = -1; z <= 1; z++) {
-        
-        // Define Materials
-        // If isSolved = true, use standard colors.
-        // If isSolved = false, use GHOST color for ALL faces (even centers).
-        
-        const defaultColor = isSolved ? null : colors.Ghost;
-
-        const mats = [
-            new THREE.MeshPhongMaterial({ color: defaultColor || (x==1?colors.R:colors.Core) }),
-            new THREE.MeshPhongMaterial({ color: defaultColor || (x==-1?colors.L:colors.Core) }),
-            new THREE.MeshPhongMaterial({ color: defaultColor || (y==1?colors.U:colors.Core) }),
-            new THREE.MeshPhongMaterial({ color: defaultColor || (y==-1?colors.D:colors.Core) }),
-            new THREE.MeshPhongMaterial({ color: defaultColor || (z==1?colors.F:colors.Core) }),
-            new THREE.MeshPhongMaterial({ color: defaultColor || (z==-1?colors.B:colors.Core) })
-        ];
-        
-        const cube = new THREE.Mesh(geo, mats);
-        cube.position.set(x, y, z);
-        cube.userData = { ix: x, iy: y, iz: z, isCenter: (Math.abs(x)+Math.abs(y)+Math.abs(z))===1 };
-        
-        pivotGroup.add(cube);
-        cubes.push(cube);
-    }
+        for (let y = -1; y <= 1; y++)
+            for (let z = -1; z <= 1; z++) {
+                const mats = [
+                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.R : colors.Core }), 
+                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.L : colors.Core }), 
+                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.U : colors.Core }), 
+                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.D : colors.Core }), 
+                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.F : colors.Core }), 
+                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.B : colors.Core })  
+                ];
+                const cube = new THREE.Mesh(geo, mats);
+                cube.position.set(x, y, z);
+                cube.userData = { 
+                    ix: x, iy: y, iz: z, 
+                    isCenter: (Math.abs(x) + Math.abs(y) + Math.abs(z)) === 1
+                };
+                pivotGroup.add(cube);
+                cubes.push(cube);
+            }
 }
 
-/* =============================================================================
-   SECTION 6: CAMERA LOGIC (GHOST & GUIDE)
-   ============================================================================= */
+/* =======================
+   CAMERA MODULE (HSL + ANIMATED GUIDE)
+======================= */
 async function startCameraMode() {
+    if(isAnimating) return;
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: 'environment' } 
+            video: { facingMode: 'environment', width: {ideal: 640}, height: {ideal: 640} } 
         });
         videoEl.srcObject = stream;
         videoStream = stream;
-        
-        // 1. Activate Split Screen & Resize
-        document.body.classList.add("cam-active");
-        scannerUI.style.display = "flex";
-        
-        // Force resize update after CSS transition (approx 100ms)
-        setTimeout(onWindowResize, 100);
-
-        // 2. Reset State
+        camOverlay.style.display = 'flex';
         isCameraActive = true;
         scanIndex = 0;
-        scannedFacesData = [];
+        isMirrored = false; 
+        videoEl.style.transform = "none";
+        scannedFacesData = []; 
         
-        // 3. Reset Cube to GHOST MODE (All Grey)
-        createCube(false);
-        
-        // 4. Set Initial Guide Rotation (Isometric 3-Face View)
-        gsapRotateTo(0.5, -0.6); 
-        guideText.innerText = scanSequence[0].action;
-        
-        requestAnimationFrame(processCameraFrame);
+        // Reset manual flags
+        const dots = document.getElementsByClassName("cam-dot");
+        for(let d of dots) d.dataset.manual = "";
 
+        updateCamInstruction();
+        requestAnimationFrame(processCameraFrame);
     } catch(e) {
-        alert("Camera Error: " + e.message);
+        alert("Camera access denied. " + e.message);
     }
 }
 
 function stopCameraMode() {
     isCameraActive = false;
-    document.body.classList.remove("cam-active");
-    scannerUI.style.display = "none";
-    if(videoStream) videoStream.getTracks().forEach(t => t.stop());
-    setTimeout(onWindowResize, 100);
+    camOverlay.style.display = 'none';
+    if(videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+    }
+}
+
+function updateCamInstruction() {
+    const step = scanIndex;
+    let mainText = "";
+    let subText = "";
+    
+    // VISUAL GUIDE ANIMATION LOGIC
+    // Rotations to show the user what to do NEXT
+    
+    if(step === 0) {
+        mainText = "Start: Scan Face 1";
+        subText = "This will be your primary face";
+        // Show Front Face (Reset)
+        guideCube.style.transform = "rotateY(0deg) rotateX(0deg)";
+    } else if(step === 1) {
+        mainText = "Rotate Cube RIGHT";
+        subText = "Turn the whole cube to the left to see the Right side";
+        // Animate Cube turning to show Right Face
+        guideCube.style.transform = "rotateY(-90deg)";
+    } else if(step === 2) {
+        mainText = "Rotate Cube RIGHT (Again)";
+        subText = "See the Back side";
+        guideCube.style.transform = "rotateY(-180deg)";
+    } else if(step === 3) {
+        mainText = "Rotate Cube RIGHT (Last)";
+        subText = "See the Left side (4th side)";
+        guideCube.style.transform = "rotateY(-270deg)";
+    } else if(step === 4) {
+        // We are currently at Left Face (RotY -270).
+        // User asked to go from Left(Orange) to Top(White).
+        // That means tipping the cube 'Backward' or rotating X.
+        mainText = "Rotate Cube UP";
+        subText = "Tip the cube back to see the TOP face";
+        // From -270 Y, we rotate X to show top
+        guideCube.style.transform = "rotateY(-270deg) rotateX(-90deg)";
+    } else if(step === 5) {
+        // We are at Top.
+        // User needs to go to Bottom.
+        // Best way: Tip cube all the way forward 180?
+        // Or go back to Left and tilt down?
+        // Let's Guide: Tip Forward twice.
+        mainText = "Rotate Cube DOWN (to Bottom)";
+        subText = "Flip it all the way over to see the BOTTOM";
+        guideCube.style.transform = "rotateY(-270deg) rotateX(90deg)";
+    }
+
+    camStep.innerText = mainText;
+    camSub.innerText = subText;
 }
 
 function processCameraFrame() {
     if(!isCameraActive) return;
 
     if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
-        canvasEl.width = videoEl.videoWidth;
-        canvasEl.height = videoEl.videoHeight;
-        ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+        ctx.drawImage(videoEl, 0, 0, 300, 300);
         
         const dots = document.getElementsByClassName("cam-dot");
-        const size = Math.min(canvasEl.width, canvasEl.height) * 0.6;
-        const startX = (canvasEl.width - size)/2;
-        const startY = (canvasEl.height - size)/2;
-        const cell = size/3;
+        const cellW = 300 / 3;
+        const cellH = 300 / 3;
         
-        let currentFrameColors = [];
-
         for(let row=0; row<3; row++) {
             for(let col=0; col<3; col++) {
-                const cx = startX + col*cell + cell/2;
-                const cy = startY + row*cell + cell/2;
-                const p = ctx.getImageData(cx-2, cy-2, 5, 5).data;
-                let r=0,g=0,b=0;
-                for(let k=0; k<p.length; k+=4){ r+=p[k]; g+=p[k+1]; b+=p[k+2]; }
-                const count = p.length/4;
-                r/=count; g/=count; b/=count;
-                
-                const dot = dots[row*3+col];
-                let colorCode = 'U';
-
-                if(dot.dataset.manual) {
-                    colorCode = dot.dataset.color;
-                } else {
-                    colorCode = getHSLColor(r, g, b);
-                    dot.style.backgroundColor = hexToString(colors[colorCode]);
-                    dot.dataset.color = colorCode;
+                const x = col * cellW + cellW/2;
+                const y = row * cellH + cellH/2;
+                const frame = ctx.getImageData(x-5, y-5, 10, 10).data;
+                let r=0, g=0, b=0;
+                for(let i=0; i<frame.length; i+=4) {
+                    r+=frame[i]; g+=frame[i+1]; b+=frame[i+2];
                 }
-                currentFrameColors.push(colorCode);
+                const count = frame.length / 4;
+                r = Math.floor(r/count); g = Math.floor(g/count); b = Math.floor(b/count);
+
+                const dotIndex = row*3 + col;
+                const visualIndex = isMirrored ? (row*3 + (2-col)) : dotIndex;
+                const dot = dots[visualIndex];
+
+                if(!dot.dataset.manual) {
+                    const match = getHSLColor(r, g, b);
+                    dot.style.backgroundColor = hexToString(colors[match]);
+                    dot.dataset.color = match;
+                }
             }
-        }
-        
-        // LIVE 3D MAPPING: Only if NOT animating the guide rotation
-        if(!isAnimating) {
-            applyLiveColorsTo3DCube(currentFrameColors);
         }
     }
     requestAnimationFrame(processCameraFrame);
 }
 
-// --- COLOR DETECTION ---
+// --- HSL LOGIC ---
 function getHSLColor(r, g, b) {
-    r/=255; g/=255; b/=255;
-    const max = Math.max(r,g,b), min = Math.min(r,g,b);
-    let h, s, l = (max+min)/2;
+    const hsl = rgbToHsl(r, g, b);
+    const h = hsl[0];
+    const s = hsl[1];
+    const l = hsl[2];
 
-    if(max === min) h = s = 0;
-    else {
-        const d = max-min;
-        s = l > 0.5 ? d/(2-max-min) : d/(max+min);
-        switch(max){
-            case r: h = (g-b)/d + (g<b?6:0); break;
-            case g: h = (b-r)/d + 2; break;
-            case b: h = (r-g)/d + 4; break;
+    if (s < hslRules.white.sMax || l > 85) return 'U';
+    
+    if (h >= hslRules.red.hMin || h <= hslRules.red.hMax) return 'R';
+    if (h >= hslRules.orange.hMin && h <= hslRules.orange.hMax) return 'L';
+    if (h >= hslRules.yellow.hMin && h <= hslRules.yellow.hMax) return 'D';
+    if (h >= hslRules.green.hMin && h <= hslRules.green.hMax) return 'F';
+    if (h >= hslRules.blue.hMin && h <= hslRules.blue.hMax) return 'B';
+
+    return 'L'; // Fallback
+}
+
+function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+
+    if (max === min) {
+        h = s = 0; 
+    } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
         }
         h /= 6;
     }
-    h *= 360; s *= 100; l *= 100;
-
-    if(s < hslRules.white.sMax) return 'U';
-    if(h >= hslRules.orange.hMin && h <= hslRules.orange.hMax && s > hslRules.orange.sMin) return 'L';
-    if(h >= hslRules.yellow.hMin && h <= hslRules.yellow.hMax) return 'D';
-    if(h >= hslRules.green.hMin && h <= hslRules.green.hMax) return 'F';
-    if(h >= hslRules.blue.hMin && h <= hslRules.blue.hMax) return 'B';
-    if(h >= hslRules.red1.hMin || h <= hslRules.red2.hMax) return 'R';
-    return 'R'; 
+    return [h * 360, s * 100, l * 100];
 }
 
 function hexToString(hex) {
     return "#" + hex.toString(16).padStart(6, '0');
 }
 
-// --- LIVE MAPPING ---
-function applyLiveColorsTo3DCube(colorsArr) {
-    // Determine which 9 facelets are pointing at the camera (Screen Z)
-    // IMPORTANT: Since we are in Isometric view, the "Face" might be angled.
-    // However, the user is looking at the camera feed.
-    // We assume the face the user is holding is the one we want to paint on the virtual cube's "Front-ish" side.
-    
-    // Simplification: We blindly paint the face that corresponds to the CURRENT SCAN INDEX logic.
-    // BUT since we allowed "Any Start", we don't know logical face.
-    // Visual approach: Find facelets with Normal matching the Camera Vector most closely.
-    
-    // Since pivotGroup is rotated, we un-rotate the Camera Vector (0,0,1) into Local Space?
-    // Or rotate Local Normals into World Space.
-    
-    // In our scan sequence, we rotate the cube so the target face is roughly facing Z.
-    // Exception: U and D might be angled.
-    // Let's use a wide threshold for dot product.
-    
-    const camDir = new THREE.Vector3(0,0,1);
-    let visibleFacelets = [];
-    
-    cubes.forEach(c => {
-        c.material.forEach((mat, matIdx) => {
-            let normal = getLocalNormal(matIdx);
-            normal.applyQuaternion(c.quaternion); 
-            normal.applyQuaternion(pivotGroup.quaternion);
-            
-            if(normal.dot(camDir) > 0.6) { // 0.6 threshold allows for isometric tilt
-                let wp = c.position.clone();
-                wp.applyQuaternion(pivotGroup.quaternion);
-                visibleFacelets.push({ mesh:c, matIdx:matIdx, x:wp.x, y:wp.y });
-            }
-        });
-    });
-    
-    // Sort Top-Left to Bottom-Right visually
-    visibleFacelets.sort((a,b) => (b.y - a.y) || (a.x - b.x));
-    
-    // Paint if we found 9 candidates
-    if(visibleFacelets.length === 9) {
-        visibleFacelets.forEach((v, i) => {
-            // Paint EVERYTHING (including Centers) to 'U', 'R', etc.
-            // This replaces the 'Ghost' color live.
-            v.mesh.material[v.matIdx].color.setHex(colors[colorsArr[i]]);
-            v.mesh.material[v.matIdx].needsUpdate = true;
-        });
-    }
-}
-
-function getLocalNormal(matIdx) {
-    if(matIdx===0) return new THREE.Vector3(1,0,0);
-    if(matIdx===1) return new THREE.Vector3(-1,0,0);
-    if(matIdx===2) return new THREE.Vector3(0,1,0);
-    if(matIdx===3) return new THREE.Vector3(0,-1,0);
-    if(matIdx===4) return new THREE.Vector3(0,0,1);
-    if(matIdx===5) return new THREE.Vector3(0,0,-1);
-    return new THREE.Vector3(0,0,1);
-}
-
-// --- CAPTURE & SLOW GUIDE ---
 function captureFace() {
-    if(isAnimating) return; 
-
     const dots = document.getElementsByClassName("cam-dot");
-    let faceColors = [];
-    for(let d of dots) faceColors.push(d.dataset.color);
-    scannedFacesData.push(faceColors);
+    let currentFaceColors = [];
+    
+    for(let i=0; i<9; i++) {
+        currentFaceColors.push(dots[i].dataset.color);
+    }
+
+    scannedFacesData.push(currentFaceColors);
     
     for(let d of dots) d.dataset.manual = "";
 
     scanIndex++;
-    if(scanIndex < 6) {
-        const step = scanSequence[scanIndex];
-        guideText.innerText = step.action;
-        gsapRotateTo(step.rot.x, step.rot.y);
-    } else {
+    if(scanIndex >= 6) {
         stopCameraMode();
-        solveFromScan();
+        processScannedData();
+    } else {
+        updateCamInstruction();
     }
 }
 
-function gsapRotateTo(tx, ty) {
-    isAnimating = true;
-    const sx = pivotGroup.rotation.x;
-    const sy = pivotGroup.rotation.y;
-    const st = Date.now();
+// --- MAPPING LOGIC ---
+function processScannedData() {
+    // 0:Face1, 1:Right, 2:Back, 3:Left, 4:Top, 5:Bottom
     
-    function loop() {
-        let p = (Date.now()-st)/ANIMATION_SPEED;
-        if(p<1) {
-            let e = (p < 0.5) ? 2*p*p : -1+(4-2*p)*p; // EaseInOut
-            pivotGroup.rotation.x = sx + (tx-sx)*e;
-            pivotGroup.rotation.y = sy + (ty-sy)*e;
-            requestAnimationFrame(loop);
-        } else {
-            pivotGroup.rotation.x = tx;
-            pivotGroup.rotation.y = ty;
-            isAnimating = false;
-        }
-    }
-    loop();
-}
-
-/* =============================================================================
-   SECTION 7: MAPPING & SOLVER
-   ============================================================================= */
-function solveFromScan() {
-    const faceMap = {}; 
-    scannedFacesData.forEach(faceData => {
-        const center = faceData[4];
-        faceMap[center] = faceData;
+    const centerMap = {}; 
+    const centersFound = [];
+    scannedFacesData.forEach((faceData, idx) => {
+        const centerColor = faceData[4]; 
+        centerMap[centerColor] = { colors: faceData, originalIdx: idx };
+        centersFound.push(centerColor);
     });
-    
-    if(Object.keys(faceMap).length !== 6) {
-        alert("Scan Error: Duplicate centers detected! Please rescan.");
-        // Reset to Ghost mode so they can try again
-        createCube(false);
+
+    const unique = new Set(centersFound);
+    if(unique.size !== 6) {
+        alert("Scan Error: Duplicate centers detected. Please rescan.");
         return;
     }
-    
-    applyScanToLogicalCubes(faceMap);
-    
-    let cubeStr = "";
-    ['U','R','F','D','L','B'].forEach(face => {
-        cubeStr += faceMap[face].join("");
-    });
-    
-    statusEl.innerText = "Solving...";
-    solverWorker.postMessage({ type: "solve", cube: cubeStr });
-}
 
-function applyScanToLogicalCubes(faceMap) {
-    ['U','R','F','D','L','B'].forEach(key => {
-        let targetCubes = getCubesForFace(key);
-        targetCubes = sortCubesForGrid(targetCubes, key);
-        let colorsArr = faceMap[key];
+    ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
+        const faceData = centerMap[faceKey];
+        if(!faceData) return;
+
+        let targetCubes = getCubesForFace(faceKey);
+        targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
-        for(let i=0; i<9; i++){
-            let c = targetCubes[i];
+        const colorsArr = faceData.colors;
+        for(let i=0; i<9; i++) {
+            const c = targetCubes[i];
             if(!c.userData.isCenter) {
-                let norm = getFaceNormal(key);
-                let matIdx = getVisibleFaceMatIndex(c, norm);
-                if(matIdx!==-1) {
-                    c.material[matIdx].color.setHex(colors[colorsArr[i]]);
+                const colorCode = colorsArr[i];
+                const norm = getFaceNormal(faceKey);
+                const matIdx = getVisibleFaceMatIndex(c, norm);
+                if(matIdx !== -1) {
+                    c.material[matIdx].color.setHex(colors[colorCode]);
                     c.material[matIdx].needsUpdate = true;
                 }
-            } else {
-                // Also paint centers now to ensure full colored cube
-                let norm = getFaceNormal(key);
-                let matIdx = getVisibleFaceMatIndex(c, norm);
-                if(matIdx!==-1) c.material[matIdx].color.setHex(colors[colorsArr[i]]);
             }
         }
     });
-    runLogicalAutofill(false);
+
+    statusEl.innerText = "Scan Mapped! Solving...";
+    runLogicalAutofill(false); 
     updatePaletteCounts();
+    solveCube();
 }
-
-/* =============================================================================
-   SECTION 8: LOGIC ENGINE & HELPERS (Restored)
-   ============================================================================= */
-function runLogicalAutofill(simMode) {
-    let changed = true;
-    let iter = 0;
-    let filled = 0;
-    
-    while(changed && iter<20) {
-        changed = false;
-        iter++;
-        
-        let pieces = [];
-        cubes.forEach(c => {
-            if(c.userData.isCenter) return;
-            const exposed = [];
-            const x=Math.round(c.position.x), y=Math.round(c.position.y), z=Math.round(c.position.z);
-            const check = (wx,wy,wz,fn) => {
-                if((wx!==0 && x===wx)||(wy!==0 && y===wy)||(wz!==0 && z===wz)) {
-                    let mIdx = getVisibleFaceMatIndex(c, new THREE.Vector3(wx,wy,wz));
-                    if(mIdx!==-1) {
-                        let m = c.material[mIdx];
-                        let hex = m.color.getHex();
-                        // Treat Ghost as Null
-                        let key = (hex === colors.Ghost) ? null : getColorKey(hex);
-                        exposed.push({ mat:m, color: key });
-                    }
-                }
-            };
-            check(0,1,0,"U"); check(0,-1,0,"D");
-            check(1,0,0,"R"); check(-1,0,0,"L");
-            check(0,0,1,"F"); check(0,0,-1,"B");
-            
-            if(exposed.length>0) {
-                let painted = exposed.map(e=>e.color).filter(c=>c!==null);
-                pieces.push({ obj:c, type: exposed.length===3?'corner':'edge', exposed, painted, complete: painted.length===exposed.length });
-            }
-        });
-
-        let corn = [...ALL_CORNERS], edge = [...ALL_EDGES];
-        pieces.forEach(p => {
-            if(p.complete) {
-                let s = new Set(p.painted);
-                if(p.type==='corner') {
-                    let i = corn.findIndex(c => c.every(k=>s.has(k)));
-                    if(i!==-1) corn.splice(i,1);
-                } else {
-                    let i = edge.findIndex(e => e.every(k=>s.has(k)));
-                    if(i!==-1) edge.splice(i,1);
-                }
-            }
-        });
-
-        pieces.forEach(p => {
-            if(p.complete || p.painted.length===0) return;
-            let cands = [];
-            if(p.type==='corner') cands = corn.filter(c => p.painted.every(k=>c.includes(k)));
-            else cands = edge.filter(e => p.painted.every(k=>e.includes(k)));
-            
-            p.candidates = cands; 
-
-            if(cands.length===1) {
-                if(fillP(p, cands[0], simMode)) { changed=true; filled++; }
-            }
-        });
-    }
-    
-    if(!simMode) calculatePredictiveHint(cubes); 
-    return filled;
-}
-
-function fillP(p, cand, sim) {
-    let hit = false;
-    let needed = cand.filter(c => !p.painted.includes(c));
-    p.exposed.forEach(e => {
-        if(e.color===null && needed.length>0) {
-            let fill = needed.shift();
-            e.mat.color.setHex(colors[fill]);
-            e.mat.needsUpdate = true;
-            hit = true;
-            if(!sim) { autofillCount++; statsDiv.innerText = "Autofilled: "+autofillCount; }
-        }
-    });
-    return hit;
-}
-
-function calculatePredictiveHint() {} // Placeholder for advanced hint optimization
 
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
@@ -745,23 +606,54 @@ function getCubesForFace(face) {
 
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
-        const ax=Math.round(a.position.x), ay=Math.round(a.position.y), az=Math.round(a.position.z);
-        const bx=Math.round(b.position.x), by=Math.round(b.position.y), bz=Math.round(b.position.z);
+        const ax = Math.round(a.position.x); const ay = Math.round(a.position.y); const az = Math.round(a.position.z);
+        const bx = Math.round(b.position.x); const by = Math.round(b.position.y); const bz = Math.round(b.position.z);
+        
+        // RELATIVE MAPPING based on the F -> R -> B -> L -> U -> D sequence
+        // Standard mapping for Front/Right/Back/Left is straightforward (Top-Left to Bottom-Right)
         if(face === 'F') return (by - ay) || (ax - bx);
         if(face === 'B') return (by - ay) || (bx - ax);
         if(face === 'R') return (by - ay) || (bz - az);
         if(face === 'L') return (by - ay) || (az - bz);
+        
+        // For U and D, it depends on the "Entrance" face. 
+        // We entered U from L (Orange). So Left of U is L. Bottom of U is F.
+        // Standard "Top Face" mapping usually has F at bottom.
+        // If we tilt 'Back' from L, the L face becomes the Bottom of the U view.
+        // This is getting complex. Let's stick to ABSOLUTE visual sort for U/D
+        // assuming the user holds U with Back at Top and Front at Bottom.
+        // If the Guide says "Rotate Up", the orientation should be standard.
         if(face === 'U') return (az - bz) || (ax - bx);
         if(face === 'D') return (bz - az) || (ax - bx);
     });
 }
 
+
+/* =======================
+   HELPERS & LOGIC
+======================= */
 function getColorKey(hex) {
     for (const k in colors) {
-        if (k === "Core" || k === "Ghost") continue;
+        if (k === "Core") continue;
         if (colors[k] === hex) return k;
     }
     return null; 
+}
+
+function snapToGrid() {
+    cubes.forEach(c => {
+        c.position.set(Math.round(c.position.x), Math.round(c.position.y), Math.round(c.position.z));
+        const euler = new THREE.Euler().setFromQuaternion(c.quaternion);
+        euler.x = Math.round(euler.x / (Math.PI/2)) * (Math.PI/2);
+        euler.y = Math.round(euler.y / (Math.PI/2)) * (Math.PI/2);
+        euler.z = Math.round(euler.z / (Math.PI/2)) * (Math.PI/2);
+        c.quaternion.setFromEuler(euler);
+        c.updateMatrix();
+        
+        c.userData.ix = Math.round(c.position.x);
+        c.userData.iy = Math.round(c.position.y);
+        c.userData.iz = Math.round(c.position.z);
+    });
 }
 
 function getVisibleFaceMatIndex(cube, worldDir) {
@@ -775,16 +667,481 @@ function getVisibleFaceMatIndex(cube, worldDir) {
     return -1;
 }
 
-function snapToGrid() {
-    cubes.forEach(c => {
-        c.position.set(Math.round(c.position.x), Math.round(c.position.y), Math.round(c.position.z));
-        let e = new THREE.Euler().setFromQuaternion(c.quaternion);
-        e.x = Math.round(e.x/(Math.PI/2))*(Math.PI/2);
-        e.y = Math.round(e.y/(Math.PI/2))*(Math.PI/2);
-        e.z = Math.round(e.z/(Math.PI/2))*(Math.PI/2);
-        c.quaternion.setFromEuler(e);
-        c.updateMatrix();
+/* =======================
+   STATE MANAGEMENT
+======================= */
+function saveBoardState() {
+    return cubes.map(c => c.material.map(m => m.color.getHex()));
+}
+
+function restoreBoardState(saved) {
+    cubes.forEach((c, i) => {
+        c.material.forEach((m, j) => {
+            const hex = saved[i][j];
+            m.color.setHex(hex);
+            m.needsUpdate = true; 
+        });
     });
+}
+
+/* =======================
+   RECURSIVE LOGICAL FILL
+======================= */
+function runLogicalAutofill(simulationMode = false) {
+    let loopChanges = true;
+    let iteration = 0;
+    let filledInThisRun = 0;
+    
+    while (loopChanges && iteration < 20) {
+        loopChanges = false;
+        iteration++;
+
+        let currentCounts = { U:0, R:0, F:0, D:0, L:0, B:0 };
+        if (!simulationMode) {
+            const state = getCubeStateString();
+            currentCounts = countColors(state);
+        }
+
+        const getExposedFaces = (c) => {
+            const x = Math.round(c.position.x);
+            const y = Math.round(c.position.y);
+            const z = Math.round(c.position.z);
+            const exposed = [];
+            const check = (wx, wy, wz, faceName) => {
+                if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
+                    const norm = new THREE.Vector3(wx, wy, wz);
+                    const matIdx = getVisibleFaceMatIndex(c, norm);
+                    if (matIdx !== -1) {
+                        const mat = c.material[matIdx];
+                        const k = getColorKey(mat.color.getHex());
+                        exposed.push({ dir: faceName, mat: mat, color: k, matIndex: matIdx });
+                    }
+                }
+            };
+            check(0,1,0,"U"); check(0,-1,0,"D");
+            check(1,0,0,"R"); check(-1,0,0,"L");
+            check(0,0,1,"F"); check(0,0,-1,"B");
+            return exposed;
+        };
+
+        let boardAnalysis = []; 
+        cubes.forEach(c => {
+            if(c.userData.isCenter) return;
+            const faces = getExposedFaces(c);
+            if(faces.length === 0) return;
+            const paintedColors = faces.map(f => f.color).filter(c => c !== null);
+            boardAnalysis.push({
+                obj: c, type: faces.length === 3 ? 'corner' : 'edge',
+                faces: faces, painted: paintedColors,
+                isComplete: paintedColors.length === faces.length
+            });
+        });
+
+        let availableCorners = [...ALL_CORNERS];
+        let availableEdges = [...ALL_EDGES];
+
+        boardAnalysis.forEach(p => {
+            if (p.isComplete) {
+                const set = new Set(p.painted);
+                if(p.type === 'corner') {
+                    const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
+                    if(idx !== -1) availableCorners.splice(idx, 1);
+                } else {
+                    const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
+                    if(idx !== -1) availableEdges.splice(idx, 1);
+                }
+            }
+        });
+
+        boardAnalysis.forEach(p => {
+            if (p.isComplete || p.painted.length === 0) return; 
+            let candidates = [];
+            if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
+            else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
+            
+            p.possibleCandidates = candidates; 
+
+            if (candidates.length === 1) {
+                if(!simulationMode) {
+                    const cand = candidates[0];
+                    const needed = cand.filter(c => !p.painted.includes(c));
+                    if (needed.some(c => currentCounts[c] >= 9)) return; 
+                }
+
+                if(fillPiece(p, candidates[0], simulationMode)) {
+                    loopChanges = true;
+                    filledInThisRun++;
+                }
+            }
+        });
+
+        if (!loopChanges && !simulationMode) {
+            availableCorners.forEach(cand => {
+                const compatiblePieces = boardAnalysis.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
+                if (compatiblePieces.length === 1) {
+                    if(fillPiece(compatiblePieces[0], cand, simulationMode)) {
+                        loopChanges = true;
+                        filledInThisRun++;
+                    }
+                }
+            });
+            availableEdges.forEach(cand => {
+                const compatiblePieces = boardAnalysis.filter(p => p.type === 'edge' && !p.isComplete && p.painted.every(col => cand.includes(col)));
+                if (compatiblePieces.length === 1) {
+                    if(fillPiece(compatiblePieces[0], cand, simulationMode)) {
+                        loopChanges = true;
+                        filledInThisRun++;
+                    }
+                }
+            });
+        }
+    }
+    
+    if(!simulationMode) {
+        let finalAnalysis = generateBoardAnalysis(); 
+        calculatePredictiveHint(finalAnalysis);
+        updatePaletteCounts();
+    }
+    return filledInThisRun;
+}
+
+function generateBoardAnalysis() {
+    let availableCorners = [...ALL_CORNERS];
+    let availableEdges = [...ALL_EDGES];
+    let boardAnalysis = [];
+
+    cubes.forEach(c => {
+        if(c.userData.isCenter) return;
+        const exposed = [];
+        const x = Math.round(c.position.x);
+        const y = Math.round(c.position.y);
+        const z = Math.round(c.position.z);
+        
+        const check = (wx, wy, wz, faceName) => {
+            if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
+                const norm = new THREE.Vector3(wx, wy, wz);
+                const matIdx = getVisibleFaceMatIndex(c, norm);
+                if (matIdx !== -1) {
+                    const mat = c.material[matIdx];
+                    const k = getColorKey(mat.color.getHex());
+                    exposed.push({ dir: faceName, mat: mat, color: k });
+                }
+            }
+        };
+        check(0,1,0,"U"); check(0,-1,0,"D");
+        check(1,0,0,"R"); check(-1,0,0,"L");
+        check(0,0,1,"F"); check(0,0,-1,"B");
+        
+        if(exposed.length > 0) {
+            const paintedColors = exposed.map(f => f.color).filter(c => c !== null);
+            boardAnalysis.push({
+                obj: c, type: exposed.length === 3 ? 'corner' : 'edge',
+                faces: exposed, painted: paintedColors,
+                isComplete: paintedColors.length === exposed.length
+            });
+        }
+    });
+
+    boardAnalysis.forEach(p => {
+        if (p.isComplete) {
+            const set = new Set(p.painted);
+            if(p.type === 'corner') {
+                const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
+                if(idx !== -1) availableCorners.splice(idx, 1);
+            } else {
+                const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
+                if(idx !== -1) availableEdges.splice(idx, 1);
+            }
+        }
+    });
+
+    boardAnalysis.forEach(p => {
+        if (!p.isComplete && p.painted.length > 0) {
+            if (p.type === 'corner') p.possibleCandidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
+            else p.possibleCandidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
+        }
+    });
+
+    return boardAnalysis;
+}
+
+function fillPiece(p, candidateColors, isSimulation) {
+    let filledSomething = false;
+    const missing = candidateColors.filter(c => !p.painted.includes(c));
+    p.faces.forEach(f => {
+        if (f.color === null && missing.length > 0) {
+            const fill = missing.shift(); 
+            f.mat.color.setHex(colors[fill]);
+            f.mat.needsUpdate = true;
+            filledSomething = true;
+            if(!isSimulation) {
+                autofillCount++;
+                statsDiv.innerText = "Autofilled: " + autofillCount;
+            }
+        }
+    });
+    return filledSomething;
+}
+
+function calculatePredictiveHint(boardPieces) {
+    let candidates = boardPieces.filter(p => 
+        !p.isComplete && p.painted.length > 0 && p.possibleCandidates && p.possibleCandidates.length > 0
+    );
+
+    if (candidates.length === 0) {
+        hintBox.visible = false;
+        return;
+    }
+
+    let bestScore = 0;
+    let bestPiece = null;
+    const originalState = saveBoardState();
+
+    candidates.forEach(piece => {
+        const testCandidate = piece.possibleCandidates[0]; 
+        let emptyFace = piece.faces.find(f => f.color === null);
+        
+        if (emptyFace && testCandidate) {
+            const neededColors = testCandidate.filter(c => !piece.painted.includes(c));
+            if(neededColors.length > 0) {
+                const testColor = neededColors[0];
+                try {
+                    emptyFace.mat.color.setHex(colors[testColor]);
+                    emptyFace.mat.needsUpdate = true;
+                    
+                    const reactionScore = runLogicalAutofill(true);
+                    if (reactionScore > bestScore) {
+                        bestScore = reactionScore;
+                        bestPiece = piece;
+                    }
+                } finally {
+                    restoreBoardState(originalState);
+                }
+            }
+        }
+    });
+
+    if (bestPiece && bestScore > 0) {
+        hintBox.position.copy(bestPiece.obj.position);
+        hintBox.quaternion.copy(bestPiece.obj.quaternion);
+        hintBox.visible = true;
+    } else {
+        hintBox.visible = false;
+    }
+}
+
+/* =======================
+   INTERACTION
+======================= */
+function handlePaint(clientX, clientY) {
+    if (isAnimating) return;
+    mouse.x = (clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(cubes);
+
+    if (intersects.length > 0) {
+        const hit = intersects[0];
+        const obj = hit.object;
+        if (obj.userData.isCenter) {
+             statusEl.innerText = "Centers are fixed!";
+             return;
+        }
+        const matIndex = hit.face.materialIndex;
+        
+        if (obj.material[matIndex].color.getHex() !== colors[paintColor]) {
+             obj.material[matIndex].color.setHex(colors[paintColor]);
+             obj.material[matIndex].needsUpdate = true;
+             updatePaletteCounts();
+             runLogicalAutofill(false); 
+        }
+    }
+}
+
+function clearCube() {
+    if(isAnimating) return;
+    if(!confirm("Clear all colors? Centers will remain.")) return;
+    cubes.forEach(c => {
+        if(!c.userData.isCenter) {
+             c.material.forEach(m => { m.color.setHex(colors.Core); m.needsUpdate = true; });
+        }
+    });
+    solutionTextEl.innerText = "";
+    document.getElementById("action-controls").style.display = "flex";
+    document.getElementById("playback-controls").style.display = "none";
+    autofillCount = 0;
+    statsDiv.innerText = "Autofilled: 0";
+    hintBox.visible = false;
+    updatePaletteCounts();
+    statusEl.innerText = "Cube Cleared";
+}
+
+/* =======================
+   ROTATION & VISUAL MAPPING
+======================= */
+function getVisualMove(move) {
+    const face = move[0];
+    const suffix = move.substring(1);
+    
+    const logicalAxes = {
+        U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
+        R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
+        F: new THREE.Vector3(0, 0, 1), B: new THREE.Vector3(0, 0, -1)
+    };
+
+    const viewAxes = {
+        U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
+        R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
+        F: new THREE.Vector3(0, 0, 1), B: new THREE.Vector3(0, 0, -1)
+    };
+
+    const vec = logicalAxes[face].clone();
+    vec.applyQuaternion(pivotGroup.quaternion); 
+
+    let bestFace = face;
+    let maxDot = -Infinity;
+
+    for(const [k, v] of Object.entries(viewAxes)) {
+        const dot = vec.dot(v);
+        if(dot > maxDot) {
+            maxDot = dot;
+            bestFace = k;
+        }
+    }
+    return bestFace + suffix;
+}
+
+function updateDisplayMoves() {
+    displayMoves = solutionMoves.map(m => getVisualMove(m));
+    if(displayMoves.length > 0) {
+        solutionTextEl.innerText = "Visual: " + displayMoves.join(" ");
+    }
+}
+
+function rotateFace(move, reverse=false, onComplete=null) {
+    if (isAnimating && !onComplete) return;
+    isAnimating = true;
+
+    let face = move[0];
+    let prime = move.includes("'");
+    if (reverse) prime = !prime;
+    let dir = prime ? 1 : -1;
+    let axis = "y"; 
+    let group = [];
+
+    cubes.forEach(c => {
+        const { ix, iy, iz } = c.userData;
+        if(face==="U" && iy === 1) { axis="y"; group.push(c); }
+        if(face==="D" && iy === -1){ axis="y"; dir *= -1; group.push(c); }
+        if(face==="R" && ix === 1) { axis="x"; group.push(c); }
+        if(face==="L" && ix === -1){ axis="x"; dir *= -1; group.push(c); }
+        if(face==="F" && iz === 1) { axis="z"; group.push(c); }
+        if(face==="B" && iz === -1){ axis="z"; dir *= -1; group.push(c); }
+    });
+
+    const pivot = new THREE.Object3D();
+    pivot.rotation.set(0,0,0);
+    pivotGroup.add(pivot);
+    group.forEach(c => pivot.attach(c));
+
+    const targetAngle = (Math.PI/2) * dir;
+    const start = Date.now();
+
+    function step(){
+        const now = Date.now();
+        let p = (now - start) / PLAY_SPEED;
+        if(p > 1) p = 1;
+        const ease = p * (2 - p);
+        pivot.rotation[axis] = targetAngle * ease;
+
+        if(p < 1) {
+            requestAnimationFrame(step);
+        } else {
+            pivot.rotation[axis] = targetAngle;
+            pivot.updateMatrixWorld();
+            group.forEach(c => pivotGroup.attach(c));
+            pivotGroup.remove(pivot);
+            snapToGrid();
+            isAnimating = false;
+            runLogicalAutofill(false);
+            if(onComplete) onComplete();
+        }
+    }
+    step();
+}
+
+function scrambleCube() {
+    if (isAnimating) return;
+    statusEl.innerText = "Scrambling...";
+    const moves = Array.from({length: 20}, () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]);
+    let i = 0;
+    function nextMove() {
+        if (i >= moves.length) {
+            statusEl.innerText = "Ready to Solve";
+            return;
+        }
+        rotateFace(moves[i++], false, nextMove);
+    }
+    nextMove();
+}
+
+function solveCube() {
+    if (!engineReady) return alert("Engine loading...");
+    snapToGrid();
+    const cubeStr = getCubeStateString();
+    
+    if(cubeStr.includes("?")) {
+        alert("Some faces are not painted!");
+        return;
+    }
+    const counts = countColors(cubeStr);
+    const invalid = Object.entries(counts).filter(([_,v]) => v !== 9);
+    if (invalid.length) {
+        alert(`Invalid Colors! Each color must appear exactly 9 times.`);
+        return;
+    }
+
+    statusEl.innerText = "Computing solution...";
+    statusEl.style.color = "cyan";
+    solverWorker.postMessage({ type:"solve", cube: cubeStr });
+}
+
+/* =======================
+   STATE GEN
+======================= */
+function getCubeStateString() {
+    let state = "";
+    const find = (x,y,z) => cubes.find(c => Math.round(c.position.x)===x && Math.round(c.position.y)===y && Math.round(c.position.z)===z);
+
+    const faces = [
+        { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] }, 
+        { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] }, 
+        { norm: new THREE.Vector3(0,0,1), pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] }, 
+        { norm: new THREE.Vector3(0,-1,0), pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] }, 
+        { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] }, 
+        { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] } 
+    ];
+
+    faces.forEach(f => {
+        f.pts.forEach(pt => {
+            const cube = find(pt[0], pt[1], pt[2]);
+            if(cube) {
+                const matIdx = getVisibleFaceMatIndex(cube, f.norm);
+                const hex = cube.material[matIdx].color.getHex();
+                const char = getColorKey(hex);
+                state += char ? char : "?";
+            } else {
+                state += "?";
+            }
+        });
+    });
+    return state;
+}
+
+function countColors(state) {
+    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
+    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
+    return c;
 }
 
 function updatePaletteCounts() {
@@ -800,40 +1157,6 @@ function updatePaletteCounts() {
     });
 }
 
-function getCubeStateString() {
-    let state = "";
-    const find = (x,y,z) => cubes.find(c => Math.round(c.position.x)===x && Math.round(c.position.y)===y && Math.round(c.position.z)===z);
-    const faces = [
-        { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] }, 
-        { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] }, 
-        { norm: new THREE.Vector3(0,0,1), pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] }, 
-        { norm: new THREE.Vector3(0,-1,0), pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] }, 
-        { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] }, 
-        { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] } 
-    ];
-    faces.forEach(f => {
-        f.pts.forEach(pt => {
-            const cube = find(pt[0], pt[1], pt[2]);
-            if(cube) {
-                const matIdx = getVisibleFaceMatIndex(cube, f.norm);
-                const hex = cube.material[matIdx].color.getHex();
-                if(hex === colors.Ghost) state += "?";
-                else {
-                    const char = getColorKey(hex);
-                    state += char ? char : "?";
-                }
-            } else state += "?";
-        });
-    });
-    return state;
-}
-
-function countColors(state) {
-    const c = { U:0,R:0,F:0,D:0,L:0,B:0 };
-    for (const ch of state) if (c[ch] !== undefined) c[ch]++;
-    return c;
-}
-
 function selectColor(el, c) {
     paintColor = c;
     document.querySelectorAll(".swatch").forEach(s => s.classList.remove("selected"));
@@ -847,30 +1170,30 @@ function updateStepStatus() {
 }
 
 function nextMove() {
-    if (!isAnimating && moveIndex < solutionMoves.length) {
-        rotateFace(solutionMoves[moveIndex], false, () => {
-            moveIndex++;
-            updateStepStatus();
-            if(playInterval && moveIndex < solutionMoves.length) {
-                setTimeout(nextMove, MOVE_GAP);
-            } else {
-                if(moveIndex >= solutionMoves.length) {
-                    clearInterval(playInterval);
-                    playInterval = null;
-                    document.getElementById("playPauseBtn").innerText = "PLAY";
-                    statusEl.innerText = "Solved!";
-                }
+    if (isAnimating || moveIndex >= solutionMoves.length) return;
+    updateDisplayMoves(); 
+    updateStepStatus();
+    rotateFace(solutionMoves[moveIndex], false, () => {
+        moveIndex++;
+        if(playInterval && moveIndex < solutionMoves.length) {
+            setTimeout(nextMove, MOVE_GAP);
+        } else {
+            if(moveIndex >= solutionMoves.length) {
+                clearInterval(playInterval);
+                playInterval = null;
+                document.getElementById("playPauseBtn").innerText = "PLAY";
+                statusEl.innerText = "Solved!";
             }
-        });
-    }
+        }
+    });
 }
 
 function prevMove() {
-    if (!isAnimating && moveIndex > 0) {
-        moveIndex--;
-        updateStepStatus();
-        rotateFace(solutionMoves[moveIndex], true);
-    }
+    if (isAnimating || moveIndex <= 0) return;
+    moveIndex--;
+    updateDisplayMoves();
+    updateStepStatus();
+    rotateFace(solutionMoves[moveIndex], true);
 }
 
 function togglePlay() {
@@ -912,6 +1235,7 @@ function onInputMove(e) {
         pivotGroup.rotation.y += dx * 0.006;
         pivotGroup.rotation.x += dy * 0.006;
         if(solutionMoves.length > 0) {
+            updateDisplayMoves();
             updateStepStatus();
         }
     }
@@ -934,48 +1258,6 @@ function onInputEnd(e) {
     isDragging = false;
 }
 
-function handlePaint(clientX, clientY) {
-    if (isAnimating) return;
-    mouse.x = (clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(cubes);
-
-    if (intersects.length > 0) {
-        const hit = intersects[0];
-        const obj = hit.object;
-        if (obj.userData.isCenter) {
-             statusEl.innerText = "Centers are fixed!";
-             return;
-        }
-        const matIndex = hit.face.materialIndex;
-        if (obj.material[matIndex].color.getHex() !== colors[paintColor]) {
-             obj.material[matIndex].color.setHex(colors[paintColor]);
-             obj.material[matIndex].needsUpdate = true;
-             updatePaletteCounts();
-             runLogicalAutofill(false); 
-        }
-    }
-}
-
-// Scramble Logic - Resets to Solved First
-function scrambleCube() {
-    if (isAnimating) return;
-    // Fix: Force Cube to Solved State before Scrambling
-    createCube(true); 
-    statusEl.innerText = "Scrambling...";
-    const moves = Array.from({length: 20}, () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]);
-    let i = 0;
-    function nextMove() {
-        if (i >= moves.length) {
-            statusEl.innerText = "Ready to Solve";
-            return;
-        }
-        rotateFace(moves[i++], false, nextMove);
-    }
-    nextMove();
-}
-
 function animate() {
     requestAnimationFrame(animate);
     if (hintBox && hintBox.visible) {
@@ -984,45 +1266,4 @@ function animate() {
         hintBox.scale.set(scale, scale, scale);
     }
     renderer.render(scene, camera);
-}
-
-function rotateFace(move, rev, cb) {
-    if(isAnimating && !cb) return;
-    isAnimating=true;
-    let face = move[0], prime = move.includes("'");
-    if(rev) prime=!prime;
-    let dir = prime?1:-1;
-    let axis='y', group=[];
-    
-    cubes.forEach(c => {
-        let {ix,iy,iz} = c.userData;
-        if(face=='U' && iy==1) { axis='y'; group.push(c); }
-        if(face=='D' && iy==-1){ axis='y'; dir*=-1; group.push(c); }
-        if(face=='R' && ix==1) { axis='x'; group.push(c); }
-        if(face=='L' && ix==-1){ axis='x'; dir*=-1; group.push(c); }
-        if(face=='F' && iz==1) { axis='z'; group.push(c); }
-        if(face=='B' && iz==-1){ axis='z'; dir*=-1; group.push(c); }
-    });
-    
-    let piv = new THREE.Object3D();
-    pivotGroup.add(piv);
-    group.forEach(c => piv.attach(c));
-    
-    let tgt = Math.PI/2 * dir;
-    let st = Date.now();
-    function loop() {
-        let p = (Date.now()-st)/PLAY_SPEED;
-        if(p>1) p=1;
-        piv.rotation[axis] = tgt * (p*(2-p));
-        if(p<1) requestAnimationFrame(loop);
-        else {
-            piv.updateMatrixWorld();
-            group.forEach(c => pivotGroup.attach(c));
-            pivotGroup.remove(piv);
-            snapToGrid();
-            isAnimating=false;
-            if(cb) cb();
-        }
-    }
-    loop();
 }
