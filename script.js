@@ -1,11 +1,10 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – ULTIMATE EDITION (HSL + ANY START)
+   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION
    ========================================================= */
 
 /* =======================
    CONFIG & CONSTANTS
 ======================= */
-// Visual Colors for 3D Model
 const colors = {
     U: 0xffffff, // White
     R: 0xb90000, // Red
@@ -18,16 +17,14 @@ const colors = {
 
 const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// HSL RANGES (The "Brain" of color detection)
-// Hue: 0-360, Saturation: 0-100, Lightness: 0-100
-// Adjusted to separate Orange/Red/Yellow clearly
+// HSL RANGES (Adjusted for real-world lighting)
 const hslRules = {
-    white:  { sMax: 15, lMin: 40 }, // Low saturation is always White/Grey
-    orange: { hMin: 10, hMax: 45 }, // Orange is tricky (10-45)
-    yellow: { hMin: 46, hMax: 75 }, // Yellow is distinctly 46+
+    white:  { sMax: 15, lMin: 40 }, 
+    orange: { hMin: 10, hMax: 45 }, 
+    yellow: { hMin: 46, hMax: 75 }, 
     green:  { hMin: 76, hMax: 155 },
     blue:   { hMin: 156, hMax: 260 },
-    red:    { hMin: 330, hMax: 10 } // Red wraps around 360/0
+    red:    { hMin: 330, hMax: 10 } 
 };
 
 const ALL_CORNERS = [
@@ -69,11 +66,9 @@ let lastMouse = { x: 0, y: 0 };
 // Camera State
 let videoStream = null;
 let isCameraActive = false;
-// Standard Sequence: Face 1 -> Right -> Right -> Right -> Top -> Bottom
-let scanSequence = ['FACE 1', 'RIGHT', 'BACK', 'LEFT', 'TOP', 'BOTTOM']; 
 let scanIndex = 0;
 let isMirrored = false; 
-let scannedFacesData = []; // Stores the 6 faces x 9 colors raw data
+let scannedFacesData = [];
 
 /* =======================
    UI ELEMENTS
@@ -106,7 +101,24 @@ if(toolRow) {
     toolRow.appendChild(camBtn);
 }
 
-// Camera Overlay with Guide Arrows
+// ---------------------------------------------------------
+// CSS 3D CUBE FOR VISUAL GUIDE
+// ---------------------------------------------------------
+const guideStyle = document.createElement("style");
+guideStyle.innerHTML = `
+    .scene-3d { perspective: 600px; width: 80px; height: 80px; position:absolute; top:20px; right:20px; z-index:200; }
+    .cube-3d { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 0.6s ease-in-out; }
+    .face-3d { position: absolute; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border: 2px solid #fff; display:flex; align-items:center; justify-content:center; font-weight:bold; color:white; font-size:12px;}
+    .face-front  { transform: rotateY(  0deg) translateZ(40px); background:rgba(0,255,0,0.2); }
+    .face-right  { transform: rotateY( 90deg) translateZ(40px); background:rgba(255,0,0,0.2); }
+    .face-back   { transform: rotateY(180deg) translateZ(40px); background:rgba(0,0,255,0.2); }
+    .face-left   { transform: rotateY(-90deg) translateZ(40px); background:rgba(255,100,0,0.2); }
+    .face-top    { transform: rotateX( 90deg) translateZ(40px); background:rgba(255,255,255,0.2); }
+    .face-bottom { transform: rotateX(-90deg) translateZ(40px); background:rgba(255,255,0,0.2); }
+`;
+document.head.appendChild(guideStyle);
+
+// Camera Overlay
 const camOverlay = document.createElement("div");
 camOverlay.id = "cam-overlay";
 Object.assign(camOverlay.style, {
@@ -114,25 +126,33 @@ Object.assign(camOverlay.style, {
     background: 'rgba(0,0,0,0.95)', zIndex: 100, display: 'none',
     flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
 });
+
 camOverlay.innerHTML = `
     <h2 id="cam-step" style="color:white; margin:0; font-size:24px;">Start with ANY Face</h2>
     <div id="cam-sub" style="color:#aaa; font-size:14px; margin-bottom:10px;">Tap dots to fix colors manually</div>
     
+    <div class="scene-3d">
+        <div class="cube-3d" id="guide-cube">
+            <div class="face-3d face-front">1</div>
+            <div class="face-3d face-right">2</div>
+            <div class="face-3d face-back">3</div>
+            <div class="face-3d face-left">4</div>
+            <div class="face-3d face-top">5</div>
+            <div class="face-3d face-bottom">6</div>
+        </div>
+    </div>
+
     <div style="position:relative; width:300px; height:300px;">
         <div style="position:relative; width:100%; height:100%; border:3px solid #fff; border-radius:8px; overflow:hidden;">
             <video id="cam-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
             <canvas id="cam-canvas" width="300" height="300" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
             <div id="grid-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr;"></div>
         </div>
-        
-        <div id="guide-arrow" style="position:absolute; top:50%; left:100%; transform:translateY(-50%); font-size:60px; color:#00ff00; text-shadow:0 0 10px black; display:none;">🡢</div>
-        <div id="guide-arrow-up" style="position:absolute; bottom:100%; left:50%; transform:translateX(-50%); font-size:60px; color:#00ff00; text-shadow:0 0 10px black; display:none;">🡡</div>
-        <div id="guide-arrow-down" style="position:absolute; top:100%; left:50%; transform:translateX(-50%); font-size:60px; color:#00ff00; text-shadow:0 0 10px black; display:none;">🡣</div>
     </div>
 
     <div style="margin-top:20px; display:flex; gap:15px;">
         <button id="btn-mirror" class="tool-btn" style="padding:10px;">Flip Mirror</button>
-        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:12px 30px; font-weight:bold; font-size:16px;">CAPTURE & NEXT</button>
+        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:12px 30px; font-weight:bold; font-size:16px;">CAPTURE</button>
         <button id="btn-close-cam" class="tool-btn" style="background:#ff3300; padding:10px;">CANCEL</button>
     </div>
 `;
@@ -144,11 +164,7 @@ const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
 const gridEl = document.getElementById("grid-overlay");
 const camStep = document.getElementById("cam-step");
 const camSub = document.getElementById("cam-sub");
-
-// Arrows
-const arrowRight = document.getElementById("guide-arrow");
-const arrowUp = document.getElementById("guide-arrow-up");
-const arrowDown = document.getElementById("guide-arrow-down");
+const guideCube = document.getElementById("guide-cube");
 
 // Fill Grid
 for(let i=0; i<9; i++) {
@@ -330,7 +346,7 @@ function createCube() {
 }
 
 /* =======================
-   CAMERA MODULE (HSL + Relative Scanning)
+   CAMERA MODULE (HSL + ANIMATED GUIDE)
 ======================= */
 async function startCameraMode() {
     if(isAnimating) return;
@@ -345,7 +361,7 @@ async function startCameraMode() {
         scanIndex = 0;
         isMirrored = false; 
         videoEl.style.transform = "none";
-        scannedFacesData = []; // Reset storage
+        scannedFacesData = []; 
         
         // Reset manual flags
         const dots = document.getElementsByClassName("cam-dot");
@@ -370,28 +386,46 @@ function stopCameraMode() {
 function updateCamInstruction() {
     const step = scanIndex;
     let mainText = "";
-    let subText = "Hold Steady...";
-
-    // Hide all arrows
-    arrowRight.style.display = 'none';
-    arrowUp.style.display = 'none';
-    arrowDown.style.display = 'none';
-
+    let subText = "";
+    
+    // VISUAL GUIDE ANIMATION LOGIC
+    // Rotations to show the user what to do NEXT
+    
     if(step === 0) {
-        mainText = "Start: Scan ANY Face";
-        subText = "This will be your Center/Front";
-    } else if(step < 4) {
-        mainText = `Scan Right Face (${step}/6)`;
-        subText = "Rotate Cube LEFT to see Right Face";
-        arrowRight.style.display = 'block'; // Arrow points right, telling user to go there
+        mainText = "Start: Scan Face 1";
+        subText = "This will be your primary face";
+        // Show Front Face (Reset)
+        guideCube.style.transform = "rotateY(0deg) rotateX(0deg)";
+    } else if(step === 1) {
+        mainText = "Rotate Cube RIGHT";
+        subText = "Turn the whole cube to the left to see the Right side";
+        // Animate Cube turning to show Right Face
+        guideCube.style.transform = "rotateY(-90deg)";
+    } else if(step === 2) {
+        mainText = "Rotate Cube RIGHT (Again)";
+        subText = "See the Back side";
+        guideCube.style.transform = "rotateY(-180deg)";
+    } else if(step === 3) {
+        mainText = "Rotate Cube RIGHT (Last)";
+        subText = "See the Left side (4th side)";
+        guideCube.style.transform = "rotateY(-270deg)";
     } else if(step === 4) {
-        mainText = "Scan TOP Face";
-        subText = "Rotate Cube DOWN to see Top Face";
-        arrowUp.style.display = 'block';
+        // We are currently at Left Face (RotY -270).
+        // User asked to go from Left(Orange) to Top(White).
+        // That means tipping the cube 'Backward' or rotating X.
+        mainText = "Rotate Cube UP";
+        subText = "Tip the cube back to see the TOP face";
+        // From -270 Y, we rotate X to show top
+        guideCube.style.transform = "rotateY(-270deg) rotateX(-90deg)";
     } else if(step === 5) {
-        mainText = "Scan BOTTOM Face";
-        subText = "Rotate Cube UP to see Bottom Face";
-        arrowDown.style.display = 'block';
+        // We are at Top.
+        // User needs to go to Bottom.
+        // Best way: Tip cube all the way forward 180?
+        // Or go back to Left and tilt down?
+        // Let's Guide: Tip Forward twice.
+        mainText = "Rotate Cube DOWN (to Bottom)";
+        subText = "Flip it all the way over to see the BOTTOM";
+        guideCube.style.transform = "rotateY(-270deg) rotateX(90deg)";
     }
 
     camStep.innerText = mainText;
@@ -424,7 +458,6 @@ function processCameraFrame() {
                 const visualIndex = isMirrored ? (row*3 + (2-col)) : dotIndex;
                 const dot = dots[visualIndex];
 
-                // If not manually set, detect via HSL
                 if(!dot.dataset.manual) {
                     const match = getHSLColor(r, g, b);
                     dot.style.backgroundColor = hexToString(colors[match]);
@@ -436,30 +469,22 @@ function processCameraFrame() {
     requestAnimationFrame(processCameraFrame);
 }
 
-// --- NEW ROBUST HSL LOGIC ---
+// --- HSL LOGIC ---
 function getHSLColor(r, g, b) {
     const hsl = rgbToHsl(r, g, b);
     const h = hsl[0];
     const s = hsl[1];
     const l = hsl[2];
 
-    // 1. Check Achromatic (White/Grey/Black)
-    // Low saturation OR very high lightness usually means White sticker
-    if (s < hslRules.white.sMax || l > 85) {
-        return 'U'; // White
-    }
-
-    // 2. Check Colors by Hue
-    // Red wraps around (330-360 and 0-10)
+    if (s < hslRules.white.sMax || l > 85) return 'U';
+    
     if (h >= hslRules.red.hMin || h <= hslRules.red.hMax) return 'R';
-    if (h >= hslRules.orange.hMin && h <= hslRules.orange.hMax) return 'L'; // Orange
-    if (h >= hslRules.yellow.hMin && h <= hslRules.yellow.hMax) return 'D'; // Yellow
+    if (h >= hslRules.orange.hMin && h <= hslRules.orange.hMax) return 'L';
+    if (h >= hslRules.yellow.hMin && h <= hslRules.yellow.hMax) return 'D';
     if (h >= hslRules.green.hMin && h <= hslRules.green.hMax) return 'F';
     if (h >= hslRules.blue.hMin && h <= hslRules.blue.hMax) return 'B';
 
-    // Fallback: Use RGB Euclidean if HSL is ambiguous
-    // (Usually handles dark lighting better)
-    return 'L'; // Default to Orange if unsure, user can tap to fix
+    return 'L'; // Fallback
 }
 
 function rgbToHsl(r, g, b) {
@@ -491,80 +516,48 @@ function captureFace() {
     const dots = document.getElementsByClassName("cam-dot");
     let currentFaceColors = [];
     
-    // Read the grid (0-8)
-    // Note: If mirrored, the UI shows correct, but logical order is 0,1,2.
-    // The dots[] array is DOM elements. visualIndex mapped to DOM already.
-    // So we just iterate visual 0..8 (Top Left to Bottom Right)
     for(let i=0; i<9; i++) {
-        // We need to store the color keys 'U', 'R' etc.
-        // dots[i] corresponds to row-major visual grid
         currentFaceColors.push(dots[i].dataset.color);
     }
 
     scannedFacesData.push(currentFaceColors);
     
-    // Reset manual flags
     for(let d of dots) d.dataset.manual = "";
 
     scanIndex++;
     if(scanIndex >= 6) {
         stopCameraMode();
-        processScannedData(); // THE MAGIC HAPPENS HERE
+        processScannedData();
     } else {
         updateCamInstruction();
     }
 }
 
-// --- INTELLIGENT MAPPING (ANY START) ---
+// --- MAPPING LOGIC ---
 function processScannedData() {
-    // We have 6 arrays of 9 colors.
-    // Index 0: Center Face (Relative Front)
-    // Index 1: Relative Right
-    // Index 2: Relative Back
-    // Index 3: Relative Left
-    // Index 4: Relative Top
-    // Index 5: Relative Bottom
+    // 0:Face1, 1:Right, 2:Back, 3:Left, 4:Top, 5:Bottom
     
-    // 1. Identify Centers to know which scan corresponds to which absolute face
-    // Center is index 4 in the 9-element array
-    const centerMap = {}; // { 'U': scannedFacesData[X], ... }
-    
-    // Check if we have unique centers
+    const centerMap = {}; 
     const centersFound = [];
     scannedFacesData.forEach((faceData, idx) => {
-        const centerColor = faceData[4]; // Center sticker
-        centerMap[centerColor] = {
-            colors: faceData,
-            originalIdx: idx
-        };
+        const centerColor = faceData[4]; 
+        centerMap[centerColor] = { colors: faceData, originalIdx: idx };
         centersFound.push(centerColor);
     });
 
-    // Validate (Simple check)
     const unique = new Set(centersFound);
     if(unique.size !== 6) {
-        alert("Scan Error: Duplicate centers detected. Please rescan carefully.");
+        alert("Scan Error: Duplicate centers detected. Please rescan.");
         return;
     }
 
-    // 2. Apply colors to 3D Cube
-    // We need to fill the 'cubes' array based on the mapped data.
-    // We use the helper 'getCubesForFace' and 'sortCubesForGrid' using the ABSOLUTE keys.
-    
     ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
         const faceData = centerMap[faceKey];
-        if(!faceData) return; // Should not happen
+        if(!faceData) return;
 
         let targetCubes = getCubesForFace(faceKey);
-        
-        // Sorting logic differs based on how we scanned relative to the FIRST face.
-        // However, standard cube rotation (Yaw 90) keeps Up/Down orientation for the belt.
-        // Top/Bottom scans are rotated. 
-        // We need a robust sort.
-        
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
-        // Apply
         const colorsArr = faceData.colors;
         for(let i=0; i<9; i++) {
             const c = targetCubes[i];
@@ -581,7 +574,7 @@ function processScannedData() {
     });
 
     statusEl.innerText = "Scan Mapped! Solving...";
-    runLogicalAutofill(false); // Clean up any obvious ones
+    runLogicalAutofill(false); 
     updatePaletteCounts();
     solveCube();
 }
@@ -611,17 +604,25 @@ function getCubesForFace(face) {
     return list;
 }
 
-// STANDARD SORT for 3D mapping
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x); const ay = Math.round(a.position.y); const az = Math.round(a.position.z);
         const bx = Math.round(b.position.x); const by = Math.round(b.position.y); const bz = Math.round(b.position.z);
         
-        // Standard visual sort: Top-Left to Bottom-Right
+        // RELATIVE MAPPING based on the F -> R -> B -> L -> U -> D sequence
+        // Standard mapping for Front/Right/Back/Left is straightforward (Top-Left to Bottom-Right)
         if(face === 'F') return (by - ay) || (ax - bx);
         if(face === 'B') return (by - ay) || (bx - ax);
         if(face === 'R') return (by - ay) || (bz - az);
         if(face === 'L') return (by - ay) || (az - bz);
+        
+        // For U and D, it depends on the "Entrance" face. 
+        // We entered U from L (Orange). So Left of U is L. Bottom of U is F.
+        // Standard "Top Face" mapping usually has F at bottom.
+        // If we tilt 'Back' from L, the L face becomes the Bottom of the U view.
+        // This is getting complex. Let's stick to ABSOLUTE visual sort for U/D
+        // assuming the user holds U with Back at Top and Front at Bottom.
+        // If the Guide says "Rotate Up", the orientation should be standard.
         if(face === 'U') return (az - bz) || (ax - bx);
         if(face === 'D') return (bz - az) || (ax - bx);
     });
