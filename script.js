@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – PREDICTIVE HINT SYSTEM
+   RUBIK'S CUBE SOLVER – STRICT PREDICTIVE HINT SYSTEM
    ========================================================= */
 
 /* =======================
@@ -161,7 +161,7 @@ function init() {
     pivotGroup = new THREE.Group();
     scene.add(pivotGroup);
 
-    // Hint Box (Magenta Wireframe)
+    // Hint Box
     const boxGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05); 
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
     hintBox = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 2 }));
@@ -270,8 +270,6 @@ function restoreBoardState(saved) {
 /* =======================
    RECURSIVE LOGICAL FILL
 ======================= */
-// Now accepts a simulationMode flag.
-// If true: doesn't update UI, just returns count of filled blocks.
 function runLogicalAutofill(simulationMode = false) {
     let loopChanges = true;
     let iteration = 0;
@@ -284,7 +282,6 @@ function runLogicalAutofill(simulationMode = false) {
         iteration++;
         boardAnalysis = []; 
 
-        // 1. Snapshot board state
         const getExposedFaces = (c) => {
             const x = Math.round(c.position.x);
             const y = Math.round(c.position.y);
@@ -319,7 +316,6 @@ function runLogicalAutofill(simulationMode = false) {
             });
         });
 
-        // 2. Inventory Management
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
@@ -336,14 +332,13 @@ function runLogicalAutofill(simulationMode = false) {
             }
         });
 
-        // 3. Deduction
         boardAnalysis.forEach(p => {
             if (p.isComplete || p.painted.length === 0) return; 
             let candidates = [];
             if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
             else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
             
-            p.possibleCandidates = candidates; // Store for hint system
+            p.possibleCandidates = candidates; 
 
             if (candidates.length === 1) {
                 if(fillPiece(p, candidates[0], simulationMode)) {
@@ -375,7 +370,6 @@ function runLogicalAutofill(simulationMode = false) {
         }
     }
     
-    // Only calculate hint if NOT in simulation mode
     if(!simulationMode) {
         calculatePredictiveHint(boardAnalysis);
         updatePaletteCounts();
@@ -404,10 +398,10 @@ function fillPiece(p, candidateColors, isSimulation) {
 }
 
 /* =======================
-   PREDICTIVE HINT SYSTEM (The "Tiebreaker" Logic)
+   PREDICTIVE HINT SYSTEM (STRICT MODE)
 ======================= */
 function calculatePredictiveHint(boardPieces) {
-    // 1. Identify "Testable" pieces: Not complete, but has valid candidates
+    // 1. Identify "Testable" pieces
     let candidates = boardPieces.filter(p => 
         !p.isComplete && 
         p.painted.length > 0 && 
@@ -420,56 +414,37 @@ function calculatePredictiveHint(boardPieces) {
         return;
     }
 
-    let bestScore = -1;
+    let bestScore = 0; // Strict threshold: MUST result in >0 fills
     let bestPiece = null;
 
-    // Save real state before simulation
     const originalState = saveBoardState();
 
-    // 2. Simulation Loop
-    // For every piece that needs a hint...
     candidates.forEach(piece => {
-        // We only test the FIRST candidate combination. 
-        // If *any* valid choice triggers a chain reaction, this piece is a linchpin.
-        const testCandidate = piece.possibleCandidates[0]; // e.g., ["U", "R", "F"]
-        
-        // Find which face is currently empty on this piece
+        const testCandidate = piece.possibleCandidates[0]; 
         let emptyFace = piece.faces.find(f => f.color === null);
         
         if (emptyFace && testCandidate) {
-            // Find a color from the candidate that isn't painted yet
             const neededColors = testCandidate.filter(c => !piece.painted.includes(c));
             if(neededColors.length > 0) {
                 const testColor = neededColors[0];
-                
-                // SIMULATE: Paint it
                 emptyFace.mat.color.setHex(colors[testColor]);
                 
-                // RUN ENGINE: See how many blocks fill automatically
-                const reactionScore = runLogicalAutofill(true); // true = Simulation Mode
+                const reactionScore = runLogicalAutofill(true); // SIMULATE
 
-                // Evaluate
                 if (reactionScore > bestScore) {
                     bestScore = reactionScore;
                     bestPiece = piece;
                 }
                 
-                // RESTORE: Reset board for next test
                 restoreBoardState(originalState);
             }
         }
     });
 
-    // 3. Highlight the Winner
-    if (bestPiece) {
+    // Only highlight if we actually found a chain reaction (Score > 0)
+    if (bestPiece && bestScore > 0) {
         hintBox.position.copy(bestPiece.obj.position);
         hintBox.quaternion.copy(bestPiece.obj.quaternion);
-        hintBox.visible = true;
-    } else if (candidates.length > 0) {
-        // Fallback: If no chain reaction found, just highlight the one with fewest candidates
-        candidates.sort((a,b) => a.possibleCandidates.length - b.possibleCandidates.length);
-        hintBox.position.copy(candidates[0].obj.position);
-        hintBox.quaternion.copy(candidates[0].obj.quaternion);
         hintBox.visible = true;
     } else {
         hintBox.visible = false;
@@ -614,7 +589,6 @@ function rotateFace(move, reverse=false, onComplete=null) {
             snapToGrid();
             isAnimating = false;
             
-            // Recalculate Logic to move Hint to correct location
             runLogicalAutofill(false);
             
             if(onComplete) onComplete();
@@ -829,7 +803,7 @@ function animate() {
     // Continuous Pulsing Effect for Hint Box
     if (hintBox && hintBox.visible) {
         const time = Date.now() * 0.005; 
-        const scale = 1.05 + Math.sin(time * 2) * 0.05; // Pulse scale between 1.0 and 1.1
+        const scale = 1.05 + Math.sin(time * 2) * 0.05; 
         hintBox.scale.set(scale, scale, scale);
     }
 
