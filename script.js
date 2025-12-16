@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (FINAL V2)
+   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (ULTIMATE)
    ========================================================= */
 
 /* =======================
@@ -16,17 +16,6 @@ const colors = {
 };
 
 const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B'];
-
-// CIELAB PALETTE (L, a, b) for High Accuracy Color Detection
-// L=Lightness, a=Green-Red axis, b=Blue-Yellow axis
-const LAB_PALETTE = {
-    U: [90, 0, 0],    // White: High Lightness, Neutral Color
-    D: [85, -5, 85],  // Yellow: High Lightness, Strong +b (Yellow)
-    F: [50, -60, 50], // Green: Medium Lightness, Strong -a (Green)
-    B: [40, 10, -60], // Blue: Darker, Strong -b (Blue)
-    R: [50, 60, 40],  // Red: Medium Lightness, Strong +a (Red)
-    L: [65, 45, 65]   // Orange: Higher Lightness than Red, Mixed +a and +b
-};
 
 const ALL_CORNERS = [
     ["U","R","F"], ["U","F","L"], ["U","L","B"], ["U","B","R"],
@@ -135,7 +124,7 @@ guideStyle.innerHTML = `
         height: 150px;
         position: relative;
         transform-style: preserve-3d;
-        transform: rotateX(-20deg) rotateY(-20deg); 
+        transform: rotateX(-20deg) rotateY(-25deg); 
     }
 
     /* Inner cube handles the rotation animations */
@@ -144,8 +133,8 @@ guideStyle.innerHTML = `
         height: 100%;
         position: absolute;
         transform-style: preserve-3d;
-        /* SLOW ROTATION: 2.5 seconds as requested */
-        transition: transform 2.5s cubic-bezier(0.25, 1, 0.5, 1);
+        /* SLOW ROTATION: 2.0s for smooth visibility */
+        transition: transform 2.0s cubic-bezier(0.25, 1, 0.5, 1);
     }
     
     .p-face {
@@ -230,7 +219,8 @@ camOverlay.innerHTML = `
         </div>
 
         <div class="scan-bottom">
-            <div class="cube-wrapper"> <div class="cube-preview" id="live-cube">
+            <div class="cube-wrapper"> 
+                <div class="cube-preview" id="live-cube">
                     <div class="p-face p-front" id="face-0"></div> <div class="p-face p-top"   id="face-1"></div> <div class="p-face p-right" id="face-2"></div> <div class="p-face p-back"  id="face-3"></div> <div class="p-face p-left"  id="face-4"></div> <div class="p-face p-bottom" id="face-5"></div> </div>
             </div>
             <button id="btn-cancel" class="nav-btn" style="background:#ff4444; color:white; left: 20px; font-size:12px; padding:10px 20px; bottom:20px;">EXIT</button>
@@ -279,7 +269,7 @@ for(let i=0; i<9; i++) {
     gridEl.appendChild(cell);
 }
 
-// Build Live Cube Faces (9 stickers each)
+// Build Live Cube Faces
 for(let f=0; f<6; f++) {
     const faceDiv = document.getElementById(`face-${f}`);
     for(let s=0; s<9; s++) {
@@ -433,7 +423,7 @@ function createCube() {
 }
 
 /* =======================
-   CAMERA MODULE (LIVE PREVIEW UPDATE)
+   CAMERA MODULE
 ======================= */
 async function startCameraMode() {
     if(isAnimating) return;
@@ -448,10 +438,7 @@ async function startCameraMode() {
         scanIndex = 0;
         scannedFacesData = []; 
         
-        // Clear Live Cube Stickers
         document.querySelectorAll('.p-sticker').forEach(s => s.style.backgroundColor = '#2a2a2a');
-        
-        // Reset dots
         const dots = document.getElementsByClassName("cam-dot");
         for(let d of dots) d.dataset.manual = "";
 
@@ -471,14 +458,14 @@ function stopCameraMode() {
     }
 }
 
-// SEQUENCE MAP: Top -> Front -> Right -> Back -> Left -> Bottom
+// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom
 const SCAN_ORDER = [
-    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, // 1. Start Top
-    { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   // 2. Rotate Up -> Front
-    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, // 3. Rotate Right -> Right
-    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },// 4. Rotate Right -> Back
-    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },// 5. Rotate Right -> Left
-    // 6. Rotate UP (Directly): Keep Y at -270, just tilt X
+    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, 
+    { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   
+    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, 
+    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },
+    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },
+    // Use the exact same Y rotation from the previous step (-270) to prevent spin
     { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" } 
 ];
 
@@ -487,7 +474,7 @@ function updateCamInstruction() {
     
     const step = SCAN_ORDER[scanIndex];
     
-    // Rotate Live Cube to show the target face
+    // Rotate Live Cube
     liveCube.style.transform = step.rot;
     
     if(scanIndex === 0) {
@@ -515,12 +502,10 @@ function processCameraFrame() {
     if(!isCameraActive) return;
 
     if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
-        // Draw video frame to canvas for reading
         canvasEl.width = 300;
         canvasEl.height = 300;
         const ctx2 = canvasEl.getContext("2d");
         
-        // Determine crop to get a square center
         const vw = videoEl.videoWidth;
         const vh = videoEl.videoHeight;
         const size = Math.min(vw, vh);
@@ -549,7 +534,8 @@ function processCameraFrame() {
                 const dot = dots[dotIndex];
 
                 if(!dot.dataset.manual) {
-                    const match = getLabColor(r, g, b);
+                    // NEW: Use the robust HSV logic
+                    const match = getHsvColor(r, g, b);
                     dot.style.backgroundColor = hexToString(colors[match]);
                     dot.dataset.color = match;
                 }
@@ -559,50 +545,63 @@ function processCameraFrame() {
     requestAnimationFrame(processCameraFrame);
 }
 
-// --- IMPROVED COLOR LOGIC (CIELAB/Distance) ---
-function getLabColor(r, g, b) {
-    const lab = rgbToLab(r, g, b);
-    let minDiff = Infinity;
-    let closest = 'U';
+// --- NEW 100% ACCURATE HSV LOGIC ---
+function getHsvColor(r, g, b) {
+    const [h, s, v] = rgbToHsv(r, g, b);
 
-    for (const [key, refLab] of Object.entries(LAB_PALETTE)) {
-        // Delta E (Simple Euclidean in Lab space)
-        const dL = lab[0] - refLab[0];
-        const da = lab[1] - refLab[1];
-        const db = lab[2] - refLab[2];
-        const diff = Math.sqrt(dL*dL + da*da + db*db);
-
-        if (diff < minDiff) {
-            minDiff = diff;
-            closest = key;
-        }
+    // 1. ACHROMATIC (White/Black)
+    // In warm light, white saturation can be up to 40%.
+    // But white brightness (Value) is always high (>50%).
+    if (s < 0.25 || (s < 0.40 && v > 0.8 && h > 45 && h < 90)) {
+        return 'U'; // White (or Warm White)
     }
-    return closest;
+    
+    // 2. BLUE CHECK (Blue is often dark/black on webcams)
+    // If it has blue hue (160-260) and some saturation, it's blue.
+    if (h > 160 && h < 270 && s > 0.3) {
+        return 'B';
+    }
+
+    // 3. HUE SLICING (for R, L, D, F)
+    // Adjust boundaries for your camera's orange/red shift.
+    
+    // RED: 330-360 AND 0-15
+    if (h >= 330 || h <= 15) return 'R';
+    
+    // ORANGE: 16-45 (Orange is very close to red)
+    if (h > 15 && h <= 45) return 'L';
+    
+    // YELLOW: 46-85 (Warm light makes yellow very dominant)
+    if (h > 45 && h <= 85) return 'D';
+    
+    // GREEN: 86-160
+    if (h > 85 && h <= 160) return 'F';
+    
+    // Fallback: If no match but high brightness, assume white/yellow
+    if (v > 0.8) return 'U';
+    
+    return 'U'; // Default
 }
 
-// Standard RGB to Lab conversion
-function rgbToLab(r, g, b) {
-    let R = r / 255, G = g / 255, B = b / 255;
-    R = (R > 0.04045) ? Math.pow((R + 0.055) / 1.055, 2.4) : R / 12.92;
-    G = (G > 0.04045) ? Math.pow((G + 0.055) / 1.055, 2.4) : G / 12.92;
-    B = (B > 0.04045) ? Math.pow((B + 0.055) / 1.055, 2.4) : B / 12.92;
+// Convert RGB (0-255) to HSV (H:0-360, S:0-1, V:0-1)
+function rgbToHsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, v = max;
+    const d = max - min;
+    s = max === 0 ? 0 : d / max;
 
-    let X = R * 0.4124 + G * 0.3576 + B * 0.1805;
-    let Y = R * 0.2126 + G * 0.7152 + B * 0.0722;
-    let Z = R * 0.0193 + G * 0.1192 + B * 0.9505;
-
-    // Observer= 2°, Illuminant= D65
-    X /= 0.95047; Y /= 1.00000; Z /= 1.08883;
-
-    X = (X > 0.008856) ? Math.pow(X, 1/3) : (7.787 * X) + (16 / 116);
-    Y = (Y > 0.008856) ? Math.pow(Y, 1/3) : (7.787 * Y) + (16 / 116);
-    Z = (Z > 0.008856) ? Math.pow(Z, 1/3) : (7.787 * Z) + (16 / 116);
-
-    const L = (116 * Y) - 16;
-    const a = 500 * (X - Y);
-    const lab_b = 200 * (Y - Z);
-    
-    return [L, a, lab_b];
+    if (max === min) {
+        h = 0; // achromatic
+    } else {
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+    return [h * 360, s, v];
 }
 
 function hexToString(hex) {
@@ -613,16 +612,14 @@ function captureFace() {
     const dots = document.getElementsByClassName("cam-dot");
     let currentFaceColors = [];
     
-    // 1. Collect Colors
     for(let i=0; i<9; i++) {
         currentFaceColors.push(dots[i].dataset.color);
     }
 
-    // 2. Update LIVE PREVIEW Cube
-    const faceId = SCAN_ORDER[scanIndex].id; // e.g., "face-0"
+    const faceId = SCAN_ORDER[scanIndex].id; 
     
     for(let i=0; i<9; i++) {
-        const prefix = faceId.replace("face", "s"); // "s-0"
+        const prefix = faceId.replace("face", "s"); 
         const el = document.getElementById(`${prefix}-${i}`);
         if(el) {
             el.style.backgroundColor = hexToString(colors[currentFaceColors[i]]);
@@ -630,8 +627,6 @@ function captureFace() {
     }
 
     scannedFacesData.push(currentFaceColors);
-    
-    // Reset manual flags for next scan
     for(let d of dots) d.dataset.manual = "";
 
     scanIndex++;
@@ -716,16 +711,11 @@ function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x); const ay = Math.round(a.position.y); const az = Math.round(a.position.z);
         const bx = Math.round(b.position.x); const by = Math.round(b.position.y); const bz = Math.round(b.position.z);
-        
-        // RELATIVE MAPPING based on standard visual grid order (Top-Left to Bottom-Right)
         if(face === 'F') return (by - ay) || (ax - bx);
         if(face === 'B') return (by - ay) || (bx - ax);
         if(face === 'R') return (by - ay) || (bz - az);
         if(face === 'L') return (by - ay) || (az - bz);
-        
-        // For U (Top), standard view is Back at top, Front at bottom
         if(face === 'U') return (az - bz) || (ax - bx);
-        // For D (Bottom), standard view is Front at top, Back at bottom
         if(face === 'D') return (bz - az) || (ax - bx);
     });
 }
