@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (VIDEO MATCH)
+   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (FINAL)
    ========================================================= */
 
 /* =======================
@@ -17,14 +17,14 @@ const colors = {
 
 const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// HSL RANGES (Adjusted for real-world lighting)
-const hslRules = {
-    white:  { sMax: 15, lMin: 40 }, 
-    orange: { hMin: 10, hMax: 45 }, 
-    yellow: { hMin: 46, hMax: 75 }, 
-    green:  { hMin: 76, hMax: 155 },
-    blue:   { hMin: 156, hMax: 260 },
-    red:    { hMin: 330, hMax: 10 } 
+// NEW PALETTE FOR COLOR DETECTION (RGB Distance)
+const PALETTE = {
+    U: [220, 220, 220], // White (slightly dim to catch greyish white)
+    D: [220, 180, 0],   // Yellow
+    F: [0, 180, 0],     // Green
+    B: [0, 0, 180],     // Blue
+    R: [180, 0, 0],     // Red
+    L: [220, 80, 0]     // Orange
 };
 
 const ALL_CORNERS = [
@@ -67,7 +67,6 @@ let lastMouse = { x: 0, y: 0 };
 let videoStream = null;
 let isCameraActive = false;
 let scanIndex = 0;
-let isMirrored = false; 
 let scannedFacesData = [];
 
 /* =======================
@@ -111,33 +110,41 @@ guideStyle.innerHTML = `
         flex-direction: column;
         height: 100%;
         width: 100%;
-        background: #111;
+        background: #1e1e1e;
     }
     .scan-top {
         flex: 1;
         position: relative;
-        display: flex;
-        justify-content: center;
-        align-items: center;
         overflow: hidden;
-        border-bottom: 2px solid #333;
+        border-bottom: 4px solid #333;
     }
     .scan-bottom {
         flex: 1;
         position: relative;
-        perspective: 1000px;
+        perspective: 1200px; /* Better depth */
         display: flex;
         justify-content: center;
         align-items: center;
-        background: #1a1a1a;
+        background: #151515;
     }
     
-    .cube-preview {
+    /* Wrapper to hold the 3D orientation */
+    .cube-wrapper {
         width: 150px;
         height: 150px;
         position: relative;
         transform-style: preserve-3d;
-        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        /* FIXED ORIENTATION: Tilted so 3 faces are visible (Isometric-ish) */
+        transform: rotateX(-25deg) rotateY(-35deg); 
+    }
+
+    .cube-preview {
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        transform-style: preserve-3d;
+        /* SLOW ROTATION: 1.5 seconds */
+        transition: transform 1.5s cubic-bezier(0.25, 1, 0.5, 1);
     }
     
     .p-face {
@@ -145,22 +152,25 @@ guideStyle.innerHTML = `
         width: 150px;
         height: 150px;
         background: #000;
-        border: 2px solid #444;
+        border: 2px solid #555;
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         grid-template-rows: repeat(3, 1fr);
-        backface-visibility: hidden; /* Hide back for cleaner look */
+        /* Ensure faces are visible from back */
+        backface-visibility: visible; 
+        opacity: 0.95;
     }
     
     .p-sticker {
         width: 100%;
         height: 100%;
-        border: 1px solid rgba(0,0,0,0.5);
-        background-color: #333; /* Default Empty Color */
+        border: 1px solid rgba(0,0,0,0.3);
+        box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
+        background-color: #2a2a2a; 
         transition: background-color 0.2s;
     }
 
-    /* Standard Cube Mapping for CSS 3D */
+    /* Standard Cube Faces */
     .p-front  { transform: rotateY(  0deg) translateZ(75px); }
     .p-right  { transform: rotateY( 90deg) translateZ(75px); }
     .p-back   { transform: rotateY(180deg) translateZ(75px); }
@@ -168,6 +178,7 @@ guideStyle.innerHTML = `
     .p-top    { transform: rotateX( 90deg) translateZ(75px); }
     .p-bottom { transform: rotateX(-90deg) translateZ(75px); }
     
+    /* Navigation Buttons & Text */
     #cam-instruction {
         position: absolute;
         top: 20px;
@@ -176,18 +187,20 @@ guideStyle.innerHTML = `
         color: white;
         z-index: 10;
         pointer-events: none;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        text-shadow: 0 2px 4px rgba(0,0,0,0.9);
     }
     .nav-btn {
         position: absolute;
-        bottom: 20px;
+        bottom: 25px;
         z-index: 20;
-        padding: 12px 24px;
-        border-radius: 30px;
+        padding: 14px 30px;
+        border-radius: 50px;
         border: none;
-        font-weight: bold;
+        font-weight: 800;
+        font-size: 16px;
         cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: 0 6px 15px rgba(0,0,0,0.4);
+        letter-spacing: 1px;
     }
 `;
 document.head.appendChild(guideStyle);
@@ -211,16 +224,17 @@ camOverlay.innerHTML = `
             <video id="cam-video" autoplay playsinline style="height:100%; width:100%; object-fit:cover;"></video>
             <canvas id="cam-canvas" style="display:none;"></canvas>
             
-            <div id="grid-overlay" style="position:absolute; width:240px; height:240px; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; border: 2px solid rgba(255,255,255,0.5); box-shadow: 0 0 20px rgba(0,0,0,0.5);">
+            <div id="grid-overlay" style="position:absolute; width:240px; height:240px; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; border: 2px solid rgba(255,255,255,0.5); box-shadow: 0 0 20px rgba(0,0,0,0.5); top:50%; left:50%; transform:translate(-50%, -50%);">
                 </div>
             
-            <button id="btn-capture" class="nav-btn" style="background:#00ff88; color:#000; bottom: 20px;">CAPTURE</button>
+            <button id="btn-capture" class="nav-btn" style="background:#00ff88; color:#000; bottom: 20px; left:50%; transform:translateX(-50%);">CAPTURE</button>
         </div>
 
         <div class="scan-bottom">
-            <div class="cube-preview" id="live-cube">
-                <div class="p-face p-front" id="face-0"></div> <div class="p-face p-top"   id="face-1"></div> <div class="p-face p-right" id="face-2"></div> <div class="p-face p-back"  id="face-3"></div> <div class="p-face p-left"  id="face-4"></div> <div class="p-face p-bottom" id="face-5"></div> </div>
-            <button id="btn-cancel" class="nav-btn" style="background:#ff3333; color:white; left: 20px; font-size:12px; padding:8px 16px;">EXIT</button>
+            <div class="cube-wrapper"> <div class="cube-preview" id="live-cube">
+                    <div class="p-face p-front" id="face-0"></div> <div class="p-face p-top"   id="face-1"></div> <div class="p-face p-right" id="face-2"></div> <div class="p-face p-back"  id="face-3"></div> <div class="p-face p-left"  id="face-4"></div> <div class="p-face p-bottom" id="face-5"></div> </div>
+            </div>
+            <button id="btn-cancel" class="nav-btn" style="background:#ff4444; color:white; left: 20px; font-size:12px; padding:10px 20px; bottom:20px;">EXIT</button>
         </div>
     </div>
 `;
@@ -436,7 +450,7 @@ async function startCameraMode() {
         scannedFacesData = []; 
         
         // Clear Live Cube Stickers
-        document.querySelectorAll('.p-sticker').forEach(s => s.style.backgroundColor = '#333');
+        document.querySelectorAll('.p-sticker').forEach(s => s.style.backgroundColor = '#2a2a2a');
         
         // Reset dots
         const dots = document.getElementsByClassName("cam-dot");
@@ -458,15 +472,14 @@ function stopCameraMode() {
     }
 }
 
-// SEQUENCE MAP: Front -> Top -> Right -> Back -> Left -> Bottom
-// Maps step index to Standard Face ID (F, U, R, B, L, D) for the UI logic
+// SEQUENCE MAP: Top -> Front -> Right -> Back -> Left -> Bottom
 const SCAN_ORDER = [
-    { name: "FRONT", id: "face-0", rot: "rotateX(0deg) rotateY(0deg)" },
-    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg) rotateY(0deg)" },
-    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" },
-    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },
-    { name: "LEFT",  id: "face-4", rot: "rotateY(90deg)" },
-    { name: "BOTTOM",id: "face-5", rot: "rotateX(90deg)" } 
+    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, // Start with Top
+    { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   // Rotate Up -> See Front
+    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, // Rotate Right -> See Right
+    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },// Rotate Right -> See Back
+    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },// Rotate Right -> See Left
+    { name: "BOTTOM",id: "face-5", rot: "rotateX(90deg)" }   // Rotate Up -> See Bottom
 ];
 
 function updateCamInstruction() {
@@ -478,23 +491,23 @@ function updateCamInstruction() {
     liveCube.style.transform = step.rot;
     
     if(scanIndex === 0) {
-        camMsg.innerText = "Scan FRONT (Face 1)";
-        camSubMsg.innerText = "Start with the main face";
+        camMsg.innerText = "1. Scan TOP Face";
+        camSubMsg.innerText = "Center the WHITE center face";
     } else if(scanIndex === 1) {
-        camMsg.innerText = "Rotate DOWN -> Scan TOP";
-        camSubMsg.innerText = "Tip cube towards you to see Top";
+        camMsg.innerText = "2. Rotate Cube UP";
+        camSubMsg.innerText = "Show the FRONT face (Green)";
     } else if(scanIndex === 2) {
-        camMsg.innerText = "Rotate RIGHT -> Scan RIGHT";
-        camSubMsg.innerText = "Turn cube left to reveal Right side";
+        camMsg.innerText = "3. Rotate Cube RIGHT";
+        camSubMsg.innerText = "Show the RIGHT face (Red)";
     } else if(scanIndex === 3) {
-        camMsg.innerText = "Rotate RIGHT -> Scan BACK";
-        camSubMsg.innerText = "Turn cube left again";
+        camMsg.innerText = "4. Rotate Cube RIGHT";
+        camSubMsg.innerText = "Show the BACK face (Blue)";
     } else if(scanIndex === 4) {
-        camMsg.innerText = "Rotate RIGHT -> Scan LEFT";
-        camSubMsg.innerText = "Turn cube left again";
+        camMsg.innerText = "5. Rotate Cube RIGHT";
+        camSubMsg.innerText = "Show the LEFT face (Orange)";
     } else if(scanIndex === 5) {
-        camMsg.innerText = "Rotate DOWN -> Scan BOTTOM";
-        camSubMsg.innerText = "Flip all the way to see Bottom";
+        camMsg.innerText = "6. Rotate Cube UP";
+        camSubMsg.innerText = "Show the BOTTOM face (Yellow)";
     }
 }
 
@@ -546,43 +559,30 @@ function processCameraFrame() {
     requestAnimationFrame(processCameraFrame);
 }
 
-// --- HSL LOGIC ---
+// --- IMPROVED COLOR LOGIC (CIELAB/Distance) ---
 function getHSLColor(r, g, b) {
-    const hsl = rgbToHsl(r, g, b);
-    const h = hsl[0];
-    const s = hsl[1];
-    const l = hsl[2];
+    let minDist = Infinity;
+    let closest = 'U';
 
-    if (s < hslRules.white.sMax || l > 85) return 'U';
-    
-    if (h >= hslRules.red.hMin || h <= hslRules.red.hMax) return 'R';
-    if (h >= hslRules.orange.hMin && h <= hslRules.orange.hMax) return 'L';
-    if (h >= hslRules.yellow.hMin && h <= hslRules.yellow.hMax) return 'D';
-    if (h >= hslRules.green.hMin && h <= hslRules.green.hMax) return 'F';
-    if (h >= hslRules.blue.hMin && h <= hslRules.blue.hMax) return 'B';
-
-    return 'L'; // Fallback
-}
-
-function rgbToHsl(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h, s, l = (max + min) / 2;
-
-    if (max === min) {
-        h = s = 0; 
-    } else {
-        const d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        switch (max) {
-            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-            case g: h = (b - r) / d + 2; break;
-            case b: h = (r - g) / d + 4; break;
+    for (const [key, [tr, tg, tb]] of Object.entries(PALETTE)) {
+        // Redmean color distance formula
+        const rMean = (r + tr) / 2;
+        const dR = r - tr;
+        const dG = g - tg;
+        const dB = b - tb;
+        
+        const weightR = 2 + (rMean / 256);
+        const weightG = 4.0;
+        const weightB = 2 + ((255 - rMean) / 256);
+        
+        const distSq = (weightR * dR * dR) + (weightG * dG * dG) + (weightB * dB * dB);
+        
+        if (distSq < minDist) {
+            minDist = distSq;
+            closest = key;
         }
-        h /= 6;
     }
-    return [h * 360, s * 100, l * 100];
+    return closest;
 }
 
 function hexToString(hex) {
@@ -599,17 +599,10 @@ function captureFace() {
     }
 
     // 2. Update LIVE PREVIEW Cube
-    // Determine which visual face corresponds to current scanIndex
-    // Map: 0->Front, 1->Top, 2->Right, 3->Back, 4->Left, 5->Bottom
     const faceId = SCAN_ORDER[scanIndex].id; // e.g., "face-0"
     
     for(let i=0; i<9; i++) {
-        const stickerEl = document.getElementById(faceId.replace('face', 's') + `-${i}`);
-        // s-0-0, s-0-1 etc
-        // We need to map grid index to sticker ID.
-        // ID format: s-{faceIndex}-{stickerIndex}
-        // faceId gives "face-0", so we want "s-0"
-        const prefix = faceId.replace("face", "s");
+        const prefix = faceId.replace("face", "s"); // "s-0"
         const el = document.getElementById(`${prefix}-${i}`);
         if(el) {
             el.style.backgroundColor = hexToString(colors[currentFaceColors[i]]);
@@ -632,8 +625,6 @@ function captureFace() {
 
 // --- MAPPING LOGIC ---
 function processScannedData() {
-    // 0:Face1, 1:Right, 2:Back, 3:Left, 4:Top, 5:Bottom
-    
     const centerMap = {}; 
     const centersFound = [];
     scannedFacesData.forEach((faceData, idx) => {
