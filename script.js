@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – PERFECT "SUDOKU" LOGIC
+   RUBIK'S CUBE SOLVER – UPDATED (Colors, Flat View, Split Moves)
    ========================================================= */
 
 /* =======================
@@ -8,9 +8,9 @@
 const colors = {
     U: 0xffffff, // White
     R: 0xb90000, // Red
-    F: 0x00e600, // Green (Brighter, adjusted from 0x009e60)
+    F: 0x00ff00, // Green (Brighter/Lime Green per request)
     D: 0xffd500, // Yellow
-    L: 0xff4500, // Orange (Darker/Redder to distinguish from Yellow)
+    L: 0xff3300, // Orange (Redder to distinguish from Yellow)
     B: 0x0051ba, // Blue
     Core: 0x202020 // Dark Grey (Internal)
 };
@@ -27,7 +27,7 @@ const ALL_EDGES = [
 ];
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
-const PLAY_SPEED = 1000; 
+const PLAY_SPEED = 600; // Slightly faster since double moves take 2 steps now
 const SCRAMBLE_SPEED = 100; 
 
 /* =======================
@@ -69,7 +69,6 @@ solverWorker.onmessage = (e) => {
         statusEl.style.color = "#00ff00";
     }
     if (d.type === "solution") {
-        if (d.type === "solution") {
         if (!d.solution || d.solution.startsWith("Error")) {
             statusEl.innerText = "Unsolvable! Check for duplicate colors.";
             statusEl.style.color = "red";
@@ -81,7 +80,7 @@ solverWorker.onmessage = (e) => {
              return;
         }
 
-        // --- NEW CODE: SPLIT 180 MOVES ---
+        // --- UPDATED: SPLIT 180 MOVES INTO 2 STEPS ---
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
         
@@ -94,15 +93,14 @@ solverWorker.onmessage = (e) => {
                 solutionMoves.push(move);
             }
         });
-        // ---------------------------------
+        // ---------------------------------------------
 
         moveIndex = 0;
-        solutionTextEl.innerText = d.solution; // Keep original text for display
+        solutionTextEl.innerText = d.solution; // Display original solution text
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
         updateStepStatus();
     }
-       
     if (d.type === "error") {
         statusEl.innerText = "Invalid Configuration";
         statusEl.style.color = "red";
@@ -121,7 +119,9 @@ function init() {
     scene.background = new THREE.Color(0x111111);
 
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 0, 12);
+    
+    // --- UPDATED: FLAT VIEW (Camera on Z-axis only) ---
+    camera.position.set(0, 0, 16); 
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -144,8 +144,14 @@ function init() {
     scene.add(pivotGroup);
 
     createCube();
-    pivotGroup.rotation.x = 0;
-    pivotGroup.rotation.y = -0.5;
+    
+    // Reset initial rotation so it appears flat initially
+    pivotGroup.rotation.x = 0.5; // Slight tilt to see top (optional, set to 0 for perfectly flat)
+    pivotGroup.rotation.y = -0.6; // Slight tilt to see side (optional, set to 0 for perfectly flat)
+    
+    // If you want it PERFECTLY flat on load, uncomment these:
+    // pivotGroup.rotation.x = 0;
+    // pivotGroup.rotation.y = 0;
 
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
@@ -296,7 +302,6 @@ function runLogicalAutofill() {
         });
 
         // 3. LOGIC A: FORWARD DEDUCTION
-        // "I am Piece X. I have colors [White, Red]. Only [White, Red, Blue] is left in inventory. I must be Blue."
         boardPieces.forEach(p => {
             if (p.isComplete) return; 
             if (p.painted.length === 0) return; 
@@ -311,7 +316,6 @@ function runLogicalAutofill() {
         });
 
         // 4. LOGIC B: REVERSE DEDUCTION (INVERSE)
-        // "I am the [White, Red, Green] candidate in inventory. Only one empty slot on the board fits me. I go there."
         if (!loopChanges) {
             // Check remaining Corners
             availableCorners.forEach(cand => {
@@ -426,6 +430,11 @@ function rotateFace(move, reverse=false, onComplete=null) {
     let prime = move.includes("'");
     let twice = move.includes("2");
     if (reverse) prime = !prime;
+    
+    // Logic note: Since we split 180 moves into 2 steps in the solution array,
+    // "twice" (e.g. U2) will rarely happen during SOLVE playback, 
+    // but might still happen during random Scramble.
+    
     let dir = prime ? 1 : -1;
     let axis = "y"; 
     let group = [];
