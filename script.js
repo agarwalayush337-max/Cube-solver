@@ -1,9 +1,9 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – FIXED COUNTER & ROBUST LOGIC
+   RUBIK'S CUBE SOLVER – ULTIMATE EDITION (CAMERA + AI)
    ========================================================= */
 
 /* =======================
-   CONFIG
+   CONFIG & CONSTANTS
 ======================= */
 const colors = {
     U: 0xffffff, // White
@@ -13,6 +13,16 @@ const colors = {
     L: 0xff3300, // Orange (Red-Orange)
     B: 0x0051ba, // Blue
     Core: 0x202020 // Dark Grey (Internal)
+};
+
+// Map standardized colors to RGB vectors for Camera matching
+const paletteRGB = {
+    U: { r:255, g:255, b:255 },
+    R: { r:185, g:0,   b:0   },
+    F: { r:0,   g:255, b:0   },
+    D: { r:255, g:213, b:0   },
+    L: { r:255, g:51,  b:0   },
+    B: { r:0,   g:81,  b:186 }
 };
 
 const ALL_CORNERS = [
@@ -44,7 +54,6 @@ let solutionMoves = [];
 let displayMoves = [];  
 let moveIndex = 0;
 let playInterval = null;
-
 let autofillCount = 0; 
 
 let isMouseDown = false;
@@ -52,12 +61,20 @@ let isDragging = false;
 let startMouse = { x: 0, y: 0 };
 let lastMouse = { x: 0, y: 0 };
 
+// Camera State
+let videoStream = null;
+let isCameraActive = false;
+let scanFaceOrder = ['F', 'R', 'B', 'L', 'U', 'D']; // Standard rotation flow
+let scanIndex = 0;
+let isMirrored = false; // Laptop vs Mobile
+
 /* =======================
-   UI ELEMENTS
+   UI ELEMENTS (Dynamic Injection)
 ======================= */
 const statusEl = document.getElementById("status");
 const solutionTextEl = document.getElementById("solutionText");
 
+// Autofill Stats
 const statsDiv = document.createElement("div");
 statsDiv.style.position = "absolute";
 statsDiv.style.bottom = "20px";
@@ -70,6 +87,79 @@ statsDiv.style.pointerEvents = "none";
 statsDiv.style.textShadow = "0 0 5px black";
 statsDiv.innerText = "Autofilled: 0";
 document.body.appendChild(statsDiv);
+
+// Camera Button
+const toolRow = document.getElementById("tool-row");
+if(toolRow) {
+    const camBtn = document.createElement("button");
+    camBtn.innerText = "📷 SCAN CUBE";
+    camBtn.className = "tool-btn";
+    camBtn.style.background = "#0051ba";
+    camBtn.onclick = startCameraMode;
+    toolRow.appendChild(camBtn);
+}
+
+// Camera Overlay Container
+const camOverlay = document.createElement("div");
+camOverlay.id = "cam-overlay";
+Object.assign(camOverlay.style, {
+    position: 'absolute', top:0, left:0, width:'100%', height:'100%',
+    background: 'rgba(0,0,0,0.95)', zIndex: 100, display: 'none',
+    flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
+});
+camOverlay.innerHTML = `
+    <h2 id="cam-instruction" style="color:white; margin-bottom:10px;">Scan FRONT Face</h2>
+    <div style="position:relative; width:300px; height:300px; border:2px solid #fff;">
+        <video id="cam-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
+        <canvas id="cam-canvas" width="300" height="300" style="position:absolute; top:0; left:0;"></canvas>
+        <div id="grid-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr;">
+            </div>
+    </div>
+    <div style="margin-top:15px; display:flex; gap:10px;">
+        <button id="btn-mirror" class="tool-btn" style="padding:10px;">Flip Mirror</button>
+        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:10px 20px; font-weight:bold;">CAPTURE</button>
+        <button id="btn-close-cam" class="tool-btn" style="background:#ff3300; padding:10px;">X</button>
+    </div>
+    <div id="cam-warning" style="color:orange; margin-top:5px; font-size:12px; height:15px;"></div>
+`;
+document.body.appendChild(camOverlay);
+
+const videoEl = document.getElementById("cam-video");
+const canvasEl = document.getElementById("cam-canvas");
+const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
+const gridEl = document.getElementById("grid-overlay");
+const camInstruction = document.getElementById("cam-instruction");
+const camWarning = document.getElementById("cam-warning");
+
+// Fill Grid
+for(let i=0; i<9; i++) {
+    let cell = document.createElement("div");
+    cell.style.border = "1px solid rgba(255,255,255,0.3)";
+    cell.style.display = "flex";
+    cell.style.alignItems = "center";
+    cell.style.justifyContent = "center";
+    
+    let dot = document.createElement("div");
+    dot.className = "cam-dot";
+    dot.style.width = "20px";
+    dot.style.height = "20px";
+    dot.style.borderRadius = "50%";
+    dot.style.background = "transparent";
+    dot.style.border = "2px solid white";
+    dot.style.boxShadow = "0 0 4px black";
+    
+    cell.appendChild(dot);
+    gridEl.appendChild(cell);
+}
+
+// Camera Events
+document.getElementById("btn-mirror").onclick = () => {
+    isMirrored = !isMirrored;
+    videoEl.style.transform = isMirrored ? "scaleX(-1)" : "none";
+};
+document.getElementById("btn-close-cam").onclick = stopCameraMode;
+document.getElementById("btn-capture").onclick = captureFace;
+
 
 /* =======================
    WORKER SETUP
@@ -84,7 +174,7 @@ solverWorker.onmessage = (e) => {
     const d = e.data;
     if (d.type === "ready") {
         engineReady = true;
-        statusEl.innerText = "Ready! Paint or Scramble.";
+        statusEl.innerText = "Ready! Paint, Scan or Scramble.";
         statusEl.style.color = "#00ff00";
     }
     if (d.type === "solution") {
@@ -101,12 +191,10 @@ solverWorker.onmessage = (e) => {
 
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
-        
         rawMoves.forEach(move => {
             if (move.includes("2")) {
                 let base = move.replace("2", "");
-                solutionMoves.push(base); 
-                solutionMoves.push(base); 
+                solutionMoves.push(base); solutionMoves.push(base); 
             } else {
                 solutionMoves.push(move);
             }
@@ -115,10 +203,8 @@ solverWorker.onmessage = (e) => {
         moveIndex = 0;
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
-        
         updateDisplayMoves();
         updateStepStatus();
-        
         if(hintBox) hintBox.visible = false;
     }
     if (d.type === "error") {
@@ -137,7 +223,6 @@ animate();
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111);
-
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(0, 0, 16); 
     camera.lookAt(0, 0, 0);
@@ -215,6 +300,222 @@ function createCube() {
 }
 
 /* =======================
+   CAMERA MODULE
+======================= */
+async function startCameraMode() {
+    if(isAnimating) return;
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment', width: {ideal: 640}, height: {ideal: 640} } 
+        });
+        videoEl.srcObject = stream;
+        videoStream = stream;
+        camOverlay.style.display = 'flex';
+        isCameraActive = true;
+        scanIndex = 0;
+        
+        // Default to mirrored for laptops (assumed if no facingMode specific support found, but safer to start false)
+        isMirrored = false; 
+        videoEl.style.transform = "none";
+        
+        updateCamInstruction();
+        requestAnimationFrame(processCameraFrame);
+    } catch(e) {
+        alert("Camera access denied or unavailable. " + e.message);
+    }
+}
+
+function stopCameraMode() {
+    isCameraActive = false;
+    camOverlay.style.display = 'none';
+    if(videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        videoStream = null;
+    }
+    // Run autofill once after scanning
+    runLogicalAutofill(false);
+    updatePaletteCounts();
+}
+
+function updateCamInstruction() {
+    const face = scanFaceOrder[scanIndex];
+    let text = "";
+    if(face === 'F') text = "Scan FRONT (Green Center)";
+    if(face === 'R') text = "Rotate RIGHT (Red Center)";
+    if(face === 'B') text = "Rotate RIGHT (Blue Center)";
+    if(face === 'L') text = "Rotate RIGHT (Orange Center)";
+    if(face === 'U') text = "Rotate UP (White Center)";
+    if(face === 'D') text = "Rotate DOWN (Yellow Center)";
+    camInstruction.innerText = text;
+}
+
+function processCameraFrame() {
+    if(!isCameraActive) return;
+
+    if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+        ctx.drawImage(videoEl, 0, 0, 300, 300);
+        
+        // Analyze 9 grid points
+        const dots = document.getElementsByClassName("cam-dot");
+        const cellW = 300 / 3;
+        const cellH = 300 / 3;
+        
+        let validColors = 0;
+
+        for(let row=0; row<3; row++) {
+            for(let col=0; col<3; col++) {
+                // Center of the cell
+                const x = col * cellW + cellW/2;
+                const y = row * cellH + cellH/2;
+                
+                // Average 10x10 area
+                const frame = ctx.getImageData(x-5, y-5, 10, 10).data;
+                let r=0, g=0, b=0;
+                for(let i=0; i<frame.length; i+=4) {
+                    r+=frame[i]; g+=frame[i+1]; b+=frame[i+2];
+                }
+                const count = frame.length / 4;
+                r = Math.floor(r/count);
+                g = Math.floor(g/count);
+                b = Math.floor(b/count);
+
+                // Detect Haziness (Low Contrast)
+                const maxC = Math.max(r,g,b);
+                const minC = Math.min(r,g,b);
+                if(maxC - minC < 20) {
+                    camWarning.innerText = "⚠️ Image too hazy/dark. Improve lighting.";
+                } else {
+                    camWarning.innerText = "";
+                }
+
+                // Match to Palette
+                const match = getClosestColor(r, g, b);
+                
+                // Update Overlay Dot
+                const dotIndex = row*3 + col;
+                const visualIndex = isMirrored ? (row*3 + (2-col)) : dotIndex; // Flip visual logic
+                
+                dots[visualIndex].style.backgroundColor = hexToString(colors[match]);
+                dots[visualIndex].dataset.color = match;
+            }
+        }
+    }
+    requestAnimationFrame(processCameraFrame);
+}
+
+function getClosestColor(r, g, b) {
+    let minDist = Infinity;
+    let closest = 'U';
+    
+    for(const [key, val] of Object.entries(paletteRGB)) {
+        // Euclidean distance
+        const dist = Math.sqrt(
+            Math.pow(val.r - r, 2) +
+            Math.pow(val.g - g, 2) +
+            Math.pow(val.b - b, 2)
+        );
+        if(dist < minDist) {
+            minDist = dist;
+            closest = key;
+        }
+    }
+    return closest;
+}
+
+function hexToString(hex) {
+    return "#" + hex.toString(16).padStart(6, '0');
+}
+
+function captureFace() {
+    const dots = document.getElementsByClassName("cam-dot");
+    const faceChar = scanFaceOrder[scanIndex];
+    
+    // Map 2D grid to 3D cube state
+    // 0 1 2
+    // 3 4 5
+    // 6 7 8
+    
+    // Determine rotation logic based on current scanIndex to map to 3D view
+    // Note: We are just blindly painting the face 'faceChar' with the scanned colors
+    // We need to know which 3D cubes correspond to this face.
+    
+    // Get target cubes for this face
+    let targetCubes = getCubesForFace(faceChar);
+    
+    // Sort targetCubes to match Top-Left to Bottom-Right order
+    targetCubes = sortCubesForGrid(targetCubes, faceChar);
+
+    // Apply colors
+    for(let i=0; i<9; i++) {
+        // 4 is Center, skip center to keep orientation valid? 
+        // No, standard centers are fixed. But user might hold cube wrong.
+        // Let's assume standard orientation and only paint non-centers.
+        const c = targetCubes[i];
+        if(!c.userData.isCenter) {
+            const detectedColor = dots[i].dataset.color;
+            // Find face material index
+            const norm = getFaceNormal(faceChar);
+            const matIdx = getVisibleFaceMatIndex(c, norm);
+            if(matIdx !== -1) {
+                c.material[matIdx].color.setHex(colors[detectedColor]);
+                c.material[matIdx].needsUpdate = true;
+            }
+        }
+    }
+    
+    scanIndex++;
+    if(scanIndex >= scanFaceOrder.length) {
+        stopCameraMode();
+        statusEl.innerText = "Scan Complete! Solving...";
+        solveCube();
+    } else {
+        updateCamInstruction();
+    }
+}
+
+function getFaceNormal(face) {
+    if(face === 'U') return new THREE.Vector3(0,1,0);
+    if(face === 'D') return new THREE.Vector3(0,-1,0);
+    if(face === 'R') return new THREE.Vector3(1,0,0);
+    if(face === 'L') return new THREE.Vector3(-1,0,0);
+    if(face === 'F') return new THREE.Vector3(0,0,1);
+    if(face === 'B') return new THREE.Vector3(0,0,-1);
+}
+
+function getCubesForFace(face) {
+    const list = [];
+    cubes.forEach(c => {
+        const x = Math.round(c.position.x);
+        const y = Math.round(c.position.y);
+        const z = Math.round(c.position.z);
+        if(face === 'U' && y === 1) list.push(c);
+        if(face === 'D' && y === -1) list.push(c);
+        if(face === 'R' && x === 1) list.push(c);
+        if(face === 'L' && x === -1) list.push(c);
+        if(face === 'F' && z === 1) list.push(c);
+        if(face === 'B' && z === -1) list.push(c);
+    });
+    return list;
+}
+
+// Sorts 9 cubes into Top-Left -> Bottom-Right order visual for that face
+function sortCubesForGrid(list, face) {
+    return list.sort((a,b) => {
+        const ax = Math.round(a.position.x); const ay = Math.round(a.position.y); const az = Math.round(a.position.z);
+        const bx = Math.round(b.position.x); const by = Math.round(b.position.y); const bz = Math.round(b.position.z);
+        
+        // Logic: Sort by Y (Top to Bottom), then by X/Z (Left to Right)
+        if(face === 'F') return (by - ay) || (ax - bx); // Y desc, X asc
+        if(face === 'B') return (by - ay) || (bx - ax); // Y desc, X desc
+        if(face === 'R') return (by - ay) || (bz - az); // Y desc, Z desc
+        if(face === 'L') return (by - ay) || (az - bz); // Y desc, Z asc
+        if(face === 'U') return (az - bz) || (ax - bx); // Z asc, X asc
+        if(face === 'D') return (bz - az) || (ax - bx); // Z desc, X asc
+    });
+}
+
+
+/* =======================
    HELPERS & LOGIC
 ======================= */
 function getColorKey(hex) {
@@ -253,7 +554,7 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 }
 
 /* =======================
-   STATE MANAGEMENT (For Simulation)
+   STATE MANAGEMENT
 ======================= */
 function saveBoardState() {
     return cubes.map(c => c.material.map(m => m.color.getHex()));
@@ -281,8 +582,6 @@ function runLogicalAutofill(simulationMode = false) {
         loopChanges = false;
         iteration++;
 
-        // 1. RE-CALCULATE COUNTS AT START OF EVERY LOOP 
-        // This ensures that if we filled a Red in the last loop, we know about it now.
         let currentCounts = { U:0, R:0, F:0, D:0, L:0, B:0 };
         if (!simulationMode) {
             const state = getCubeStateString();
@@ -340,7 +639,6 @@ function runLogicalAutofill(simulationMode = false) {
             }
         });
 
-        // Forward Deduction
         boardAnalysis.forEach(p => {
             if (p.isComplete || p.painted.length === 0) return; 
             let candidates = [];
@@ -350,7 +648,6 @@ function runLogicalAutofill(simulationMode = false) {
             p.possibleCandidates = candidates; 
 
             if (candidates.length === 1) {
-                // Safety Check: Don't fill if we already have 9 of that color
                 if(!simulationMode) {
                     const cand = candidates[0];
                     const needed = cand.filter(c => !p.painted.includes(c));
@@ -364,7 +661,6 @@ function runLogicalAutofill(simulationMode = false) {
             }
         });
 
-        // Only run Reverse deduction if we aren't simulating (keep simulation strict)
         if (!loopChanges && !simulationMode) {
             availableCorners.forEach(cand => {
                 const compatiblePieces = boardAnalysis.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
@@ -387,44 +683,19 @@ function runLogicalAutofill(simulationMode = false) {
         }
     }
     
-    // Final UI update for this run
     if(!simulationMode) {
-        // Calculate hint logic based on the FINAL state of this run
-        // We need one last analysis to pass to the hint system
-        const exposedForHints = [];
-        // (Simplified re-scan for hints)
-        cubes.forEach(c => {
-             if(c.userData.isCenter) return;
-             // ... We re-use logic from loop to get boardPieces ...
-             // For brevity/performance, we can let the hint system do its own scan in 'calculatePredictiveHint'
-             // But 'calculatePredictiveHint' expects 'boardPieces' with 'possibleCandidates'.
-             // So we should ideally grab the last boardAnalysis.
-             // But boardAnalysis is local to the loop. 
-             // Let's run a lightweight scan for hints.
-        });
-        
-        // Actually, let's just trigger a re-scan inside the hint calculator or
-        // pass the boardAnalysis from the last loop iteration?
-        // Simpler: Just run the hint calculator. It parses the board itself? 
-        // No, it takes 'boardPieces' as arg.
-        // Let's re-generate boardPieces one last time for the hint system.
         let finalAnalysis = generateBoardAnalysis(); 
         calculatePredictiveHint(finalAnalysis);
-        
         updatePaletteCounts();
     }
-
     return filledInThisRun;
 }
 
-// Helper to generate analysis for Hint System (prevents code duplication)
 function generateBoardAnalysis() {
-    // Inventory
     let availableCorners = [...ALL_CORNERS];
     let availableEdges = [...ALL_EDGES];
     let boardAnalysis = [];
 
-    // Scan
     cubes.forEach(c => {
         if(c.userData.isCenter) return;
         const exposed = [];
@@ -457,7 +728,6 @@ function generateBoardAnalysis() {
         }
     });
 
-    // Remove solved from inventory
     boardAnalysis.forEach(p => {
         if (p.isComplete) {
             const set = new Set(p.painted);
@@ -471,7 +741,6 @@ function generateBoardAnalysis() {
         }
     });
 
-    // Populate candidates
     boardAnalysis.forEach(p => {
         if (!p.isComplete && p.painted.length > 0) {
             if (p.type === 'corner') p.possibleCandidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
@@ -491,7 +760,6 @@ function fillPiece(p, candidateColors, isSimulation) {
             f.mat.color.setHex(colors[fill]);
             f.mat.needsUpdate = true;
             filledSomething = true;
-            
             if(!isSimulation) {
                 autofillCount++;
                 statsDiv.innerText = "Autofilled: " + autofillCount;
@@ -501,15 +769,9 @@ function fillPiece(p, candidateColors, isSimulation) {
     return filledSomething;
 }
 
-/* =======================
-   PREDICTIVE HINT SYSTEM (SAFE & STRICT)
-======================= */
 function calculatePredictiveHint(boardPieces) {
     let candidates = boardPieces.filter(p => 
-        !p.isComplete && 
-        p.painted.length > 0 && 
-        p.possibleCandidates && 
-        p.possibleCandidates.length > 0
+        !p.isComplete && p.painted.length > 0 && p.possibleCandidates && p.possibleCandidates.length > 0
     );
 
     if (candidates.length === 0) {
@@ -519,7 +781,6 @@ function calculatePredictiveHint(boardPieces) {
 
     let bestScore = 0;
     let bestPiece = null;
-
     const originalState = saveBoardState();
 
     candidates.forEach(piece => {
@@ -530,13 +791,11 @@ function calculatePredictiveHint(boardPieces) {
             const neededColors = testCandidate.filter(c => !piece.painted.includes(c));
             if(neededColors.length > 0) {
                 const testColor = neededColors[0];
-                
                 try {
                     emptyFace.mat.color.setHex(colors[testColor]);
                     emptyFace.mat.needsUpdate = true;
                     
-                    const reactionScore = runLogicalAutofill(true); // SIMULATE
-
+                    const reactionScore = runLogicalAutofill(true);
                     if (reactionScore > bestScore) {
                         bestScore = reactionScore;
                         bestPiece = piece;
@@ -556,7 +815,6 @@ function calculatePredictiveHint(boardPieces) {
         hintBox.visible = false;
     }
 }
-
 
 /* =======================
    INTERACTION
@@ -580,11 +838,7 @@ function handlePaint(clientX, clientY) {
         if (obj.material[matIndex].color.getHex() !== colors[paintColor]) {
              obj.material[matIndex].color.setHex(colors[paintColor]);
              obj.material[matIndex].needsUpdate = true;
-             
-             // --- FIX: Update immediately so UI is snappy ---
              updatePaletteCounts();
-             
-             // Then run logic
              runLogicalAutofill(false); 
         }
     }
@@ -601,11 +855,9 @@ function clearCube() {
     solutionTextEl.innerText = "";
     document.getElementById("action-controls").style.display = "flex";
     document.getElementById("playback-controls").style.display = "none";
-    
     autofillCount = 0;
     statsDiv.innerText = "Autofilled: 0";
     hintBox.visible = false;
-
     updatePaletteCounts();
     statusEl.innerText = "Cube Cleared";
 }
@@ -697,9 +949,7 @@ function rotateFace(move, reverse=false, onComplete=null) {
             pivotGroup.remove(pivot);
             snapToGrid();
             isAnimating = false;
-            
             runLogicalAutofill(false);
-            
             if(onComplete) onComplete();
         }
     }
@@ -743,7 +993,7 @@ function solveCube() {
 }
 
 /* =======================
-   STATE STRING GEN
+   STATE GEN
 ======================= */
 function getCubeStateString() {
     let state = "";
@@ -780,9 +1030,6 @@ function countColors(state) {
     return c;
 }
 
-/* =======================
-   UI UPDATES
-======================= */
 function updatePaletteCounts() {
     if(isAnimating) return;
     const state = getCubeStateString();
@@ -803,9 +1050,6 @@ function selectColor(el, c) {
     updatePaletteCounts();
 }
 
-/* =======================
-   CONTROLS
-======================= */
 function updateStepStatus() {
     const currentVisMove = moveIndex < displayMoves.length ? displayMoves[moveIndex] : "-";
     statusEl.innerHTML = `Move: <b>${currentVisMove}</b> (Step ${moveIndex+1}/${solutionMoves.length})`;
@@ -813,10 +1057,8 @@ function updateStepStatus() {
 
 function nextMove() {
     if (isAnimating || moveIndex >= solutionMoves.length) return;
-    
     updateDisplayMoves(); 
     updateStepStatus();
-
     rotateFace(solutionMoves[moveIndex], false, () => {
         moveIndex++;
         if(playInterval && moveIndex < solutionMoves.length) {
@@ -859,9 +1101,6 @@ function resetCube() {
     location.reload();
 }
 
-/* =======================
-   INPUT
-======================= */
 function onInputStart(e) {
     isMouseDown = true;
     isDragging = false;
@@ -881,7 +1120,6 @@ function onInputMove(e) {
     if (isDragging) {
         pivotGroup.rotation.y += dx * 0.006;
         pivotGroup.rotation.x += dy * 0.006;
-        
         if(solutionMoves.length > 0) {
             updateDisplayMoves();
             updateStepStatus();
@@ -908,12 +1146,10 @@ function onInputEnd(e) {
 
 function animate() {
     requestAnimationFrame(animate);
-    
     if (hintBox && hintBox.visible) {
         const time = Date.now() * 0.005; 
         const scale = 1.05 + Math.sin(time * 2) * 0.05; 
         hintBox.scale.set(scale, scale, scale);
     }
-
     renderer.render(scene, camera);
 }
