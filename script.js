@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (FINAL)
+   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (FINAL V2)
    ========================================================= */
 
 /* =======================
@@ -17,14 +17,15 @@ const colors = {
 
 const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// NEW PALETTE FOR COLOR DETECTION (RGB Distance)
-const PALETTE = {
-    U: [220, 220, 220], // White (slightly dim to catch greyish white)
-    D: [220, 180, 0],   // Yellow
-    F: [0, 180, 0],     // Green
-    B: [0, 0, 180],     // Blue
-    R: [180, 0, 0],     // Red
-    L: [220, 80, 0]     // Orange
+// CIELAB PALETTE (L, a, b) for High Accuracy Color Detection
+// L=Lightness, a=Green-Red axis, b=Blue-Yellow axis
+const LAB_PALETTE = {
+    U: [90, 0, 0],    // White: High Lightness, Neutral Color
+    D: [85, -5, 85],  // Yellow: High Lightness, Strong +b (Yellow)
+    F: [50, -60, 50], // Green: Medium Lightness, Strong -a (Green)
+    B: [40, 10, -60], // Blue: Darker, Strong -b (Blue)
+    R: [50, 60, 40],  // Red: Medium Lightness, Strong +a (Red)
+    L: [65, 45, 65]   // Orange: Higher Lightness than Red, Mixed +a and +b
 };
 
 const ALL_CORNERS = [
@@ -104,7 +105,6 @@ if(toolRow) {
 // CSS 3D CUBE FOR SCANNING (LIVE PREVIEW)
 // ---------------------------------------------------------
 const guideStyle = document.createElement("style");
-// REPLACE guideStyle.innerHTML
 guideStyle.innerHTML = `
     .scan-container {
         display: flex;
@@ -129,13 +129,13 @@ guideStyle.innerHTML = `
         background: #151515;
     }
     
-    /* Wrapper handles the isometric tilt */
+    /* Wrapper handles the isometric tilt (3 faces visible) */
     .cube-wrapper {
         width: 150px;
         height: 150px;
         position: relative;
         transform-style: preserve-3d;
-        transform: rotateX(-20deg) rotateY(-20deg); /* Better viewing angle */
+        transform: rotateX(-20deg) rotateY(-20deg); 
     }
 
     /* Inner cube handles the rotation animations */
@@ -144,7 +144,7 @@ guideStyle.innerHTML = `
         height: 100%;
         position: absolute;
         transform-style: preserve-3d;
-        /* SLOW ROTATION: 2.5 seconds */
+        /* SLOW ROTATION: 2.5 seconds as requested */
         transition: transform 2.5s cubic-bezier(0.25, 1, 0.5, 1);
     }
     
@@ -216,8 +216,8 @@ camOverlay.innerHTML = `
     <div class="scan-container">
         <div class="scan-top">
             <div id="cam-instruction">
-                <h2 id="cam-msg" style="margin:0; font-size:22px;">Scan Front Face</h2>
-                <div id="cam-sub-msg" style="font-size:14px; color:#aaa;">Make sure colors are clear</div>
+                <h2 id="cam-msg" style="margin:0; font-size:22px;">Scan Top Face</h2>
+                <div id="cam-sub-msg" style="font-size:14px; color:#aaa;">Center the white center</div>
             </div>
             
             <video id="cam-video" autoplay playsinline style="height:100%; width:100%; object-fit:cover;"></video>
@@ -472,7 +472,6 @@ function stopCameraMode() {
 }
 
 // SEQUENCE MAP: Top -> Front -> Right -> Back -> Left -> Bottom
-// REPLACE SCAN_ORDER
 const SCAN_ORDER = [
     { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, // 1. Start Top
     { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   // 2. Rotate Up -> Front
@@ -483,11 +482,12 @@ const SCAN_ORDER = [
     { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" } 
 ];
 
-// REPLACE updateCamInstruction
 function updateCamInstruction() {
     if(scanIndex >= 6) return;
     
     const step = SCAN_ORDER[scanIndex];
+    
+    // Rotate Live Cube to show the target face
     liveCube.style.transform = step.rot;
     
     if(scanIndex === 0) {
@@ -549,7 +549,7 @@ function processCameraFrame() {
                 const dot = dots[dotIndex];
 
                 if(!dot.dataset.manual) {
-                    const match = getHSLColor(r, g, b);
+                    const match = getLabColor(r, g, b);
                     dot.style.backgroundColor = hexToString(colors[match]);
                     dot.dataset.color = match;
                 }
@@ -560,20 +560,7 @@ function processCameraFrame() {
 }
 
 // --- IMPROVED COLOR LOGIC (CIELAB/Distance) ---
-// REPLACE EVERYTHING related to color detection (getHSLColor, rgbToHsl, PALETTE)
-
-// Lab values for standard Cube Colors (approximate for webcam lighting)
-// L = Lightness, a = Green-Red, b = Blue-Yellow
-const LAB_PALETTE = {
-    U: [90, 0, 0],    // White (High lightness, no color)
-    D: [85, -5, 85],  // Yellow (High lightness, high yellow 'b')
-    F: [50, -60, 50], // Green (Medium lightness, very negative 'a')
-    B: [40, 10, -60], // Blue (Darker, very negative 'b')
-    R: [50, 60, 40],  // Red (Medium lightness, high red 'a')
-    L: [65, 45, 65]   // Orange (Higher lightness than Red, high yellow 'b' + red 'a')
-};
-
-function getHSLColor(r, g, b) {
+function getLabColor(r, g, b) {
     const lab = rgbToLab(r, g, b);
     let minDiff = Infinity;
     let closest = 'U';
@@ -613,7 +600,7 @@ function rgbToLab(r, g, b) {
 
     const L = (116 * Y) - 16;
     const a = 500 * (X - Y);
-    const lab_b = 200 * (Y - Z); // renamed var to avoid conflict
+    const lab_b = 200 * (Y - Z);
     
     return [L, a, lab_b];
 }
