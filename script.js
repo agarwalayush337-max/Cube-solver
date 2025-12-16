@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – ROBUST & SAFE (NO COLOR LEAKS)
+   RUBIK'S CUBE SOLVER – FIXED COUNTER & ROBUST LOGIC
    ========================================================= */
 
 /* =======================
@@ -264,7 +264,7 @@ function restoreBoardState(saved) {
         c.material.forEach((m, j) => {
             const hex = saved[i][j];
             m.color.setHex(hex);
-            m.needsUpdate = true; // Force update
+            m.needsUpdate = true; 
         });
     });
 }
@@ -277,13 +277,12 @@ function runLogicalAutofill(simulationMode = false) {
     let iteration = 0;
     let filledInThisRun = 0;
     
-    // Safety Break
     while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
 
-        // 0. Global Count Check (Constraint)
-        // If real mode, check if we have too many of any color
+        // 1. RE-CALCULATE COUNTS AT START OF EVERY LOOP 
+        // This ensures that if we filled a Red in the last loop, we know about it now.
         let currentCounts = { U:0, R:0, F:0, D:0, L:0, B:0 };
         if (!simulationMode) {
             const state = getCubeStateString();
@@ -312,7 +311,6 @@ function runLogicalAutofill(simulationMode = false) {
             return exposed;
         };
 
-        // 1. Analyze Board
         let boardAnalysis = []; 
         cubes.forEach(c => {
             if(c.userData.isCenter) return;
@@ -326,7 +324,6 @@ function runLogicalAutofill(simulationMode = false) {
             });
         });
 
-        // 2. Inventory Management
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
@@ -343,7 +340,7 @@ function runLogicalAutofill(simulationMode = false) {
             }
         });
 
-        // 3. Logic A: Forward Deduction (Safe)
+        // Forward Deduction
         boardAnalysis.forEach(p => {
             if (p.isComplete || p.painted.length === 0) return; 
             let candidates = [];
@@ -353,12 +350,11 @@ function runLogicalAutofill(simulationMode = false) {
             p.possibleCandidates = candidates; 
 
             if (candidates.length === 1) {
-                // Check Max Count Constraint
+                // Safety Check: Don't fill if we already have 9 of that color
                 if(!simulationMode) {
                     const cand = candidates[0];
                     const needed = cand.filter(c => !p.painted.includes(c));
-                    // If any needed color is already full (9), abort fill to prevent error
-                    if (needed.some(c => currentCounts[c] >= 9)) return;
+                    if (needed.some(c => currentCounts[c] >= 9)) return; 
                 }
 
                 if(fillPiece(p, candidates[0], simulationMode)) {
@@ -368,7 +364,7 @@ function runLogicalAutofill(simulationMode = false) {
             }
         });
 
-        // 4. Logic B: Reverse Deduction (Risky - Disabled in Simulation)
+        // Only run Reverse deduction if we aren't simulating (keep simulation strict)
         if (!loopChanges && !simulationMode) {
             availableCorners.forEach(cand => {
                 const compatiblePieces = boardAnalysis.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
@@ -391,12 +387,99 @@ function runLogicalAutofill(simulationMode = false) {
         }
     }
     
+    // Final UI update for this run
     if(!simulationMode) {
-        calculatePredictiveHint(boardAnalysis);
+        // Calculate hint logic based on the FINAL state of this run
+        // We need one last analysis to pass to the hint system
+        const exposedForHints = [];
+        // (Simplified re-scan for hints)
+        cubes.forEach(c => {
+             if(c.userData.isCenter) return;
+             // ... We re-use logic from loop to get boardPieces ...
+             // For brevity/performance, we can let the hint system do its own scan in 'calculatePredictiveHint'
+             // But 'calculatePredictiveHint' expects 'boardPieces' with 'possibleCandidates'.
+             // So we should ideally grab the last boardAnalysis.
+             // But boardAnalysis is local to the loop. 
+             // Let's run a lightweight scan for hints.
+        });
+        
+        // Actually, let's just trigger a re-scan inside the hint calculator or
+        // pass the boardAnalysis from the last loop iteration?
+        // Simpler: Just run the hint calculator. It parses the board itself? 
+        // No, it takes 'boardPieces' as arg.
+        // Let's re-generate boardPieces one last time for the hint system.
+        let finalAnalysis = generateBoardAnalysis(); 
+        calculatePredictiveHint(finalAnalysis);
+        
         updatePaletteCounts();
     }
 
     return filledInThisRun;
+}
+
+// Helper to generate analysis for Hint System (prevents code duplication)
+function generateBoardAnalysis() {
+    // Inventory
+    let availableCorners = [...ALL_CORNERS];
+    let availableEdges = [...ALL_EDGES];
+    let boardAnalysis = [];
+
+    // Scan
+    cubes.forEach(c => {
+        if(c.userData.isCenter) return;
+        const exposed = [];
+        const x = Math.round(c.position.x);
+        const y = Math.round(c.position.y);
+        const z = Math.round(c.position.z);
+        
+        const check = (wx, wy, wz, faceName) => {
+            if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
+                const norm = new THREE.Vector3(wx, wy, wz);
+                const matIdx = getVisibleFaceMatIndex(c, norm);
+                if (matIdx !== -1) {
+                    const mat = c.material[matIdx];
+                    const k = getColorKey(mat.color.getHex());
+                    exposed.push({ dir: faceName, mat: mat, color: k });
+                }
+            }
+        };
+        check(0,1,0,"U"); check(0,-1,0,"D");
+        check(1,0,0,"R"); check(-1,0,0,"L");
+        check(0,0,1,"F"); check(0,0,-1,"B");
+        
+        if(exposed.length > 0) {
+            const paintedColors = exposed.map(f => f.color).filter(c => c !== null);
+            boardAnalysis.push({
+                obj: c, type: exposed.length === 3 ? 'corner' : 'edge',
+                faces: exposed, painted: paintedColors,
+                isComplete: paintedColors.length === exposed.length
+            });
+        }
+    });
+
+    // Remove solved from inventory
+    boardAnalysis.forEach(p => {
+        if (p.isComplete) {
+            const set = new Set(p.painted);
+            if(p.type === 'corner') {
+                const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
+                if(idx !== -1) availableCorners.splice(idx, 1);
+            } else {
+                const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
+                if(idx !== -1) availableEdges.splice(idx, 1);
+            }
+        }
+    });
+
+    // Populate candidates
+    boardAnalysis.forEach(p => {
+        if (!p.isComplete && p.painted.length > 0) {
+            if (p.type === 'corner') p.possibleCandidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
+            else p.possibleCandidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
+        }
+    });
+
+    return boardAnalysis;
 }
 
 function fillPiece(p, candidateColors, isSimulation) {
@@ -448,7 +531,6 @@ function calculatePredictiveHint(boardPieces) {
             if(neededColors.length > 0) {
                 const testColor = neededColors[0];
                 
-                // SAFETY: Try/Finally to ensure restoration
                 try {
                     emptyFace.mat.color.setHex(colors[testColor]);
                     emptyFace.mat.needsUpdate = true;
@@ -499,6 +581,10 @@ function handlePaint(clientX, clientY) {
              obj.material[matIndex].color.setHex(colors[paintColor]);
              obj.material[matIndex].needsUpdate = true;
              
+             // --- FIX: Update immediately so UI is snappy ---
+             updatePaletteCounts();
+             
+             // Then run logic
              runLogicalAutofill(false); 
         }
     }
@@ -823,7 +909,6 @@ function onInputEnd(e) {
 function animate() {
     requestAnimationFrame(animate);
     
-    // Continuous Pulsing Effect for Hint Box
     if (hintBox && hintBox.visible) {
         const time = Date.now() * 0.005; 
         const scale = 1.05 + Math.sin(time * 2) * 0.05; 
