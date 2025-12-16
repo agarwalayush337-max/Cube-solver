@@ -8,9 +8,9 @@
 const colors = {
     U: 0xffffff, // White
     R: 0xb90000, // Red
-    F: 0x009e60, // Green
+    F: 0x00e600, // Green (Brighter, adjusted from 0x009e60)
     D: 0xffd500, // Yellow
-    L: 0xff5800, // Orange
+    L: 0xff4500, // Orange (Darker/Redder to distinguish from Yellow)
     B: 0x0051ba, // Blue
     Core: 0x202020 // Dark Grey (Internal)
 };
@@ -69,6 +69,7 @@ solverWorker.onmessage = (e) => {
         statusEl.style.color = "#00ff00";
     }
     if (d.type === "solution") {
+        if (d.type === "solution") {
         if (!d.solution || d.solution.startsWith("Error")) {
             statusEl.innerText = "Unsolvable! Check for duplicate colors.";
             statusEl.style.color = "red";
@@ -79,13 +80,29 @@ solverWorker.onmessage = (e) => {
              statusEl.style.color = "#00ff88";
              return;
         }
-        solutionMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
+
+        // --- NEW CODE: SPLIT 180 MOVES ---
+        let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
+        solutionMoves = [];
+        
+        rawMoves.forEach(move => {
+            if (move.includes("2")) {
+                let base = move.replace("2", "");
+                solutionMoves.push(base); // First turn
+                solutionMoves.push(base); // Second turn
+            } else {
+                solutionMoves.push(move);
+            }
+        });
+        // ---------------------------------
+
         moveIndex = 0;
-        solutionTextEl.innerText = d.solution;
+        solutionTextEl.innerText = d.solution; // Keep original text for display
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
         updateStepStatus();
     }
+       
     if (d.type === "error") {
         statusEl.innerText = "Invalid Configuration";
         statusEl.style.color = "red";
@@ -104,7 +121,7 @@ function init() {
     scene.background = new THREE.Color(0x111111);
 
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(8, 7, 12); 
+    camera.position.set(0, 0, 12);
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
