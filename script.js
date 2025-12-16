@@ -104,6 +104,7 @@ if(toolRow) {
 // CSS 3D CUBE FOR SCANNING (LIVE PREVIEW)
 // ---------------------------------------------------------
 const guideStyle = document.createElement("style");
+// REPLACE guideStyle.innerHTML
 guideStyle.innerHTML = `
     .scan-container {
         display: flex;
@@ -121,30 +122,30 @@ guideStyle.innerHTML = `
     .scan-bottom {
         flex: 1;
         position: relative;
-        perspective: 1200px; /* Better depth */
+        perspective: 1200px;
         display: flex;
         justify-content: center;
         align-items: center;
         background: #151515;
     }
     
-    /* Wrapper to hold the 3D orientation */
+    /* Wrapper handles the isometric tilt */
     .cube-wrapper {
         width: 150px;
         height: 150px;
         position: relative;
         transform-style: preserve-3d;
-        /* FIXED ORIENTATION: Tilted so 3 faces are visible (Isometric-ish) */
-        transform: rotateX(-25deg) rotateY(-35deg); 
+        transform: rotateX(-20deg) rotateY(-20deg); /* Better viewing angle */
     }
 
+    /* Inner cube handles the rotation animations */
     .cube-preview {
         width: 100%;
         height: 100%;
         position: absolute;
         transform-style: preserve-3d;
-        /* SLOW ROTATION: 1.5 seconds */
-        transition: transform 1.5s cubic-bezier(0.25, 1, 0.5, 1);
+        /* SLOW ROTATION: 2.5 seconds */
+        transition: transform 2.5s cubic-bezier(0.25, 1, 0.5, 1);
     }
     
     .p-face {
@@ -156,7 +157,6 @@ guideStyle.innerHTML = `
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         grid-template-rows: repeat(3, 1fr);
-        /* Ensure faces are visible from back */
         backface-visibility: visible; 
         opacity: 0.95;
     }
@@ -170,7 +170,7 @@ guideStyle.innerHTML = `
         transition: background-color 0.2s;
     }
 
-    /* Standard Cube Faces */
+    /* Standard Face Mappings */
     .p-front  { transform: rotateY(  0deg) translateZ(75px); }
     .p-right  { transform: rotateY( 90deg) translateZ(75px); }
     .p-back   { transform: rotateY(180deg) translateZ(75px); }
@@ -178,7 +178,6 @@ guideStyle.innerHTML = `
     .p-top    { transform: rotateX( 90deg) translateZ(75px); }
     .p-bottom { transform: rotateX(-90deg) translateZ(75px); }
     
-    /* Navigation Buttons & Text */
     #cam-instruction {
         position: absolute;
         top: 20px;
@@ -473,41 +472,42 @@ function stopCameraMode() {
 }
 
 // SEQUENCE MAP: Top -> Front -> Right -> Back -> Left -> Bottom
+// REPLACE SCAN_ORDER
 const SCAN_ORDER = [
-    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, // Start with Top
-    { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   // Rotate Up -> See Front
-    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, // Rotate Right -> See Right
-    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },// Rotate Right -> See Back
-    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },// Rotate Right -> See Left
-    { name: "BOTTOM",id: "face-5", rot: "rotateX(90deg)" }   // Rotate Up -> See Bottom
+    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, // 1. Start Top
+    { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   // 2. Rotate Up -> Front
+    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, // 3. Rotate Right -> Right
+    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },// 4. Rotate Right -> Back
+    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },// 5. Rotate Right -> Left
+    // 6. Rotate UP (Directly): Keep Y at -270, just tilt X
+    { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" } 
 ];
 
+// REPLACE updateCamInstruction
 function updateCamInstruction() {
     if(scanIndex >= 6) return;
     
     const step = SCAN_ORDER[scanIndex];
-    
-    // Rotate Live Cube to show the target face
     liveCube.style.transform = step.rot;
     
     if(scanIndex === 0) {
-        camMsg.innerText = "1. Scan TOP Face";
-        camSubMsg.innerText = "Center the WHITE center face";
+        camMsg.innerText = "1. Scan TOP (White)";
+        camSubMsg.innerText = "Center the white face";
     } else if(scanIndex === 1) {
-        camMsg.innerText = "2. Rotate Cube UP";
-        camSubMsg.innerText = "Show the FRONT face (Green)";
+        camMsg.innerText = "2. Rotate UP";
+        camSubMsg.innerText = "To see Front (Green)";
     } else if(scanIndex === 2) {
-        camMsg.innerText = "3. Rotate Cube RIGHT";
-        camSubMsg.innerText = "Show the RIGHT face (Red)";
+        camMsg.innerText = "3. Rotate RIGHT";
+        camSubMsg.innerText = "To see Right (Red)";
     } else if(scanIndex === 3) {
-        camMsg.innerText = "4. Rotate Cube RIGHT";
-        camSubMsg.innerText = "Show the BACK face (Blue)";
+        camMsg.innerText = "4. Rotate RIGHT";
+        camSubMsg.innerText = "To see Back (Blue)";
     } else if(scanIndex === 4) {
-        camMsg.innerText = "5. Rotate Cube RIGHT";
-        camSubMsg.innerText = "Show the LEFT face (Orange)";
+        camMsg.innerText = "5. Rotate RIGHT";
+        camSubMsg.innerText = "To see Left (Orange)";
     } else if(scanIndex === 5) {
-        camMsg.innerText = "6. Rotate Cube UP";
-        camSubMsg.innerText = "Show the BOTTOM face (Yellow)";
+        camMsg.innerText = "6. Rotate UP";
+        camSubMsg.innerText = "To see Bottom (Yellow)";
     }
 }
 
@@ -560,29 +560,62 @@ function processCameraFrame() {
 }
 
 // --- IMPROVED COLOR LOGIC (CIELAB/Distance) ---
+// REPLACE EVERYTHING related to color detection (getHSLColor, rgbToHsl, PALETTE)
+
+// Lab values for standard Cube Colors (approximate for webcam lighting)
+// L = Lightness, a = Green-Red, b = Blue-Yellow
+const LAB_PALETTE = {
+    U: [90, 0, 0],    // White (High lightness, no color)
+    D: [85, -5, 85],  // Yellow (High lightness, high yellow 'b')
+    F: [50, -60, 50], // Green (Medium lightness, very negative 'a')
+    B: [40, 10, -60], // Blue (Darker, very negative 'b')
+    R: [50, 60, 40],  // Red (Medium lightness, high red 'a')
+    L: [65, 45, 65]   // Orange (Higher lightness than Red, high yellow 'b' + red 'a')
+};
+
 function getHSLColor(r, g, b) {
-    let minDist = Infinity;
+    const lab = rgbToLab(r, g, b);
+    let minDiff = Infinity;
     let closest = 'U';
 
-    for (const [key, [tr, tg, tb]] of Object.entries(PALETTE)) {
-        // Redmean color distance formula
-        const rMean = (r + tr) / 2;
-        const dR = r - tr;
-        const dG = g - tg;
-        const dB = b - tb;
-        
-        const weightR = 2 + (rMean / 256);
-        const weightG = 4.0;
-        const weightB = 2 + ((255 - rMean) / 256);
-        
-        const distSq = (weightR * dR * dR) + (weightG * dG * dG) + (weightB * dB * dB);
-        
-        if (distSq < minDist) {
-            minDist = distSq;
+    for (const [key, refLab] of Object.entries(LAB_PALETTE)) {
+        // Delta E (Simple Euclidean in Lab space)
+        const dL = lab[0] - refLab[0];
+        const da = lab[1] - refLab[1];
+        const db = lab[2] - refLab[2];
+        const diff = Math.sqrt(dL*dL + da*da + db*db);
+
+        if (diff < minDiff) {
+            minDiff = diff;
             closest = key;
         }
     }
     return closest;
+}
+
+// Standard RGB to Lab conversion
+function rgbToLab(r, g, b) {
+    let R = r / 255, G = g / 255, B = b / 255;
+    R = (R > 0.04045) ? Math.pow((R + 0.055) / 1.055, 2.4) : R / 12.92;
+    G = (G > 0.04045) ? Math.pow((G + 0.055) / 1.055, 2.4) : G / 12.92;
+    B = (B > 0.04045) ? Math.pow((B + 0.055) / 1.055, 2.4) : B / 12.92;
+
+    let X = R * 0.4124 + G * 0.3576 + B * 0.1805;
+    let Y = R * 0.2126 + G * 0.7152 + B * 0.0722;
+    let Z = R * 0.0193 + G * 0.1192 + B * 0.9505;
+
+    // Observer= 2°, Illuminant= D65
+    X /= 0.95047; Y /= 1.00000; Z /= 1.08883;
+
+    X = (X > 0.008856) ? Math.pow(X, 1/3) : (7.787 * X) + (16 / 116);
+    Y = (Y > 0.008856) ? Math.pow(Y, 1/3) : (7.787 * Y) + (16 / 116);
+    Z = (Z > 0.008856) ? Math.pow(Z, 1/3) : (7.787 * Z) + (16 / 116);
+
+    const L = (116 * Y) - 16;
+    const a = 500 * (X - Y);
+    const lab_b = 200 * (Y - Z); // renamed var to avoid conflict
+    
+    return [L, a, lab_b];
 }
 
 function hexToString(hex) {
