@@ -1,33 +1,32 @@
 /* =============================================================================
-   RUBIK'S CUBE SOLVER – MASTER EDITION (LIVE GUIDE & FULL LOGIC)
+   RUBIK'S CUBE SOLVER – PERFECT UX EDITION
    Features: 
-   1. Split-Screen (Cam Top / Live 3D Bottom)
-   2. "Ghost" Cube that fills continuously
-   3. Slow-Motion Animation Guide (2.0s)
-   4. HSL Color Engine (High Accuracy)
-   5. Recursive Logic Engine (The "Brain")
+   1. Landing = Solved Cube. Scanning = Ghost Cube.
+   2. "Any Start" Logic (Centers are hidden until scanned).
+   3. Split-Screen with resizing fixes.
+   4. Slow-Motion Visual Guide.
    ============================================================================= */
 
 /* =============================================================================
-   SECTION 1: CONFIGURATION & CONSTANTS
+   SECTION 1: CONFIGURATION
    ============================================================================= */
 
 const colors = {
     U: 0xffffff, // White
     R: 0xb90000, // Red
-    F: 0x00ff00, // Green (Bright Lime)
+    F: 0x00ff00, // Green
     D: 0xffd500, // Yellow
-    L: 0xff4500, // Orange (Red-Orange)
+    L: 0xff4500, // Orange
     B: 0x0051ba, // Blue
-    Core: 0x202020, // Dark Grey (Internal/Unfilled)
-    Ghost: 0x404040 // Lighter Grey for "Unscanned" stickers
+    Core: 0x202020, 
+    Ghost: 0x555555 // Grey for unfilled faces
 };
 
 const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// HSL RANGES (Strict Logic for White/Orange separation)
+// HSL Rules (Strict White/Orange separation)
 const hslRules = {
-    white:  { sMax: 20, lMin: 35 }, // Low saturation = White/Grey
+    white:  { sMax: 20, lMin: 35 }, 
     orange: { hMin: 11,  hMax: 43, sMin: 55 }, 
     yellow: { hMin: 44,  hMax: 75 }, 
     green:  { hMin: 76,  hMax: 155 },
@@ -36,7 +35,6 @@ const hslRules = {
     red2:   { hMin: 0,   hMax: 10 }
 };
 
-// DATA: All valid piece definitions for the Logic Engine
 const ALL_CORNERS = [
     ["U","R","F"], ["U","F","L"], ["U","L","B"], ["U","B","R"],
     ["D","F","R"], ["D","L","F"], ["D","B","L"], ["D","R","B"]
@@ -48,55 +46,44 @@ const ALL_EDGES = [
 ];
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
-const PLAY_SPEED = 400;     // Animation speed for solving
-const ANIMATION_SPEED = 2000; // 2.0 Seconds (SLOW ROTATION GUIDE)
+const PLAY_SPEED = 400; 
+const ANIMATION_SPEED = 2000; // 2 seconds slow rotation
 
 /* =============================================================================
-   SECTION 2: GLOBAL VARIABLES
+   SECTION 2: GLOBAL STATE
    ============================================================================= */
 
-// 3D Scene Components
 let scene, camera, renderer;
-let raycaster, mouse;
 let cubes = [], pivotGroup; 
 let hintBox; 
 
-// State Flags
 let isAnimating = false;
 let paintColor = "U";
-let isMouseDown = false;
-let isDragging = false;
 
-// Input Tracking
-let startMouse = { x: 0, y: 0 };
-let lastMouse = { x: 0, y: 0 };
-
-// Solution State
 let solutionMoves = []; 
-let displayMoves = [];  
 let moveIndex = 0;
 let playInterval = null;
 let autofillCount = 0; 
 
-// Camera / Scanner State
+// Camera State
 let videoStream = null;
 let isCameraActive = false;
 let scanIndex = 0; 
 let scannedFacesData = []; 
 
-// Camera Rotation Sequence (The Visual Guide)
-// This dictates how the 3D cube rotates after each capture
+// Rotation Guide Sequence
+// We use relative rotations. 
 const scanSequence = [
-    { face: 'F', action: "Start: Scan the GREEN Center Face", rot: {x:0, y:0} },
-    { face: 'R', action: "Slowly Rotate Cube LEFT -> Show RED", rot: {x:0, y:-Math.PI/2} },
-    { face: 'B', action: "Slowly Rotate Cube LEFT -> Show BLUE", rot: {x:0, y:-Math.PI} },
-    { face: 'L', action: "Slowly Rotate Cube LEFT -> Show ORANGE", rot: {x:0, y:-Math.PI*1.5} },
-    { face: 'U', action: "Tip Cube DOWN -> Show WHITE", rot: {x:Math.PI/2, y:0} }, 
-    { face: 'D', action: "Tip Cube All The Way UP -> Show YELLOW", rot: {x:-Math.PI/2, y:0} } 
+    { action: "Start: Scan Face 1", rot: {x:0.5, y:-0.6} }, // Isometric start
+    { action: "Rotate Cube LEFT", rot: {x:0.5, y:-0.6 - (Math.PI/2)} }, 
+    { action: "Rotate Cube LEFT", rot: {x:0.5, y:-0.6 - (Math.PI)} },    
+    { action: "Rotate Cube LEFT", rot: {x:0.5, y:-0.6 - (Math.PI*1.5)} },
+    { action: "Rotate Cube DOWN (Top)", rot: {x:0.5 + (Math.PI/2), y:-0.6} }, 
+    { action: "Rotate Cube UP (Bottom)", rot: {x:0.5 - (Math.PI/2), y:-0.6} } 
 ];
 
 /* =============================================================================
-   SECTION 3: UI GENERATION (Split Screen)
+   SECTION 3: UI INJECTION
    ============================================================================= */
 
 const styleCSS = document.createElement("style");
@@ -109,15 +96,15 @@ styleCSS.innerHTML = `
         box-shadow: 0 4px 20px rgba(0,0,0,0.8);
     }
     
-    /* 3D Canvas Layout */
+    /* When Camera is Active, 3D Canvas moves to bottom half */
     #canvas-container {
         width: 100vw; height: 100vh;
-        transition: height 0.6s cubic-bezier(0.25, 1, 0.5, 1), top 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+        transition: height 0.5s, top 0.5s;
         position: absolute; top: 0; left: 0;
     }
     .cam-active #canvas-container {
         height: 50% !important;
-        top: 50%; /* Moves to bottom half */
+        top: 50% !important;
     }
 
     .cam-dot {
@@ -129,15 +116,15 @@ styleCSS.innerHTML = `
     .cam-dot:active { transform: scale(0.9); }
 
     #guide-text {
-        position: absolute; bottom: 15px; width: 100%; text-align: center;
-        color: #00ff00; font-size: 22px; font-weight: bold; 
-        text-shadow: 0 2px 4px #000; letter-spacing: 1px;
+        position: absolute; bottom: 10px; width: 100%; text-align: center;
+        color: #00ff00; font-size: 20px; font-weight: bold; 
+        text-shadow: 0 2px 4px #000;
         pointer-events: none; z-index: 60;
-        background: rgba(0,0,0,0.6); padding: 10px 0;
+        background: rgba(0,0,0,0.7); padding: 8px 0;
     }
     
     #cam-msg {
-        position: absolute; top: 15px; left: 15px; 
+        position: absolute; top: 10px; left: 10px; 
         color: #fff; font-size: 14px;
         background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 20px;
     }
@@ -148,29 +135,21 @@ const scannerUI = document.createElement("div");
 scannerUI.id = "scanner-ui";
 scannerUI.innerHTML = `
     <div style="position:relative; width:100%; height:100%; overflow:hidden; display:flex; justify-content:center; background:#000;">
-        <video id="cam-video" autoplay playsinline style="height:100%; width:auto; opacity:0.8;"></video>
+        <video id="cam-video" autoplay playsinline style="height:100%; width:auto; opacity:0.9;"></video>
         <canvas id="cam-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; display:none;"></canvas>
-        
         <div id="grid-overlay" style="
             position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); 
-            width:280px; height:280px; 
+            width:260px; height:260px; 
             display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; 
             border: 2px solid rgba(255,255,255,0.2); border-radius: 12px;">
         </div>
     </div>
-
-    <div style="position:absolute; bottom:20px; right:20px; display:flex; gap:10px;">
-        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:15px 40px; font-weight:bold; font-size:18px; border-radius:50px; box-shadow:0 4px 15px rgba(0,255,0,0.4); border:none;">
-            CAPTURE
-        </button>
+    <div style="position:absolute; bottom:15px; right:15px; display:flex; gap:10px;">
+        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:15px 40px; font-weight:bold; font-size:18px; border-radius:50px; border:none;">CAPTURE</button>
     </div>
-
-    <button id="btn-close" style="position:absolute; top:15px; right:15px; background:#ff3300; color:white; border:none; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer;">
-        EXIT
-    </button>
-
-    <div id="cam-msg">Tap dots to fix manually</div>
-    <div id="guide-text">Start: Scan Face 1</div>
+    <button id="btn-close" style="position:absolute; top:15px; right:15px; background:#ff3300; color:white; border:none; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer;">EXIT</button>
+    <div id="cam-msg">Tap dots to fix</div>
+    <div id="guide-text">Scan Face 1</div>
 `;
 document.body.appendChild(scannerUI);
 
@@ -180,10 +159,11 @@ const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
 const gridEl = document.getElementById("grid-overlay");
 const guideText = document.getElementById("guide-text");
 
+// Tool Row Injection
 const toolRow = document.getElementById("tool-row");
 if(toolRow) {
     const camBtn = document.createElement("button");
-    camBtn.innerText = "📷 START SCAN";
+    camBtn.innerText = "📷 SCAN CUBE";
     camBtn.className = "tool-btn";
     camBtn.style.background = "#0051ba";
     camBtn.style.marginLeft = "10px";
@@ -191,13 +171,12 @@ if(toolRow) {
     toolRow.appendChild(camBtn);
 }
 
+// Generate Grid Dots
 for(let i=0; i<9; i++) {
     let cell = document.createElement("div");
     cell.style.display="flex"; cell.style.alignItems="center"; cell.style.justifyContent="center";
-    
     let dot = document.createElement("div");
     dot.className = "cam-dot";
-    
     dot.onclick = (e) => {
         e.stopPropagation();
         const current = dot.dataset.color || 'U';
@@ -208,7 +187,6 @@ for(let i=0; i<9; i++) {
         dot.dataset.color = next;
         dot.dataset.manual = "true"; 
     };
-    
     cell.appendChild(dot);
     gridEl.appendChild(cell);
 }
@@ -222,7 +200,6 @@ document.getElementById("btn-close").onclick = stopCameraMode;
 const statusEl = document.getElementById("status");
 const solutionTextEl = document.getElementById("solutionText");
 const statsDiv = document.createElement("div"); 
-
 Object.assign(statsDiv.style, {
     position: 'absolute', bottom: '20px', left: '20px',
     color: '#00ff88', fontFamily: 'Arial', fontSize: '18px',
@@ -247,34 +224,24 @@ solverWorker.onmessage = (e) => {
             statusEl.style.color = "red";
             return;
         }
-        
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
         rawMoves.forEach(m => {
             if (m.includes("2")) {
-                let base = m.replace("2", ""); 
-                solutionMoves.push(base); 
-                solutionMoves.push(base); 
-            } else {
-                solutionMoves.push(m);
-            }
+                let base = m.replace("2", ""); solutionMoves.push(base); solutionMoves.push(base); 
+            } else solutionMoves.push(m);
         });
-        
         moveIndex = 0;
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
         updateStepStatus();
         if(hintBox) hintBox.visible = false;
-        
         statusEl.innerText = "Solution Ready!";
-    }
-    if (d.type === "error") {
-        alert("Solver Error: " + d.message);
     }
 };
 
 /* =============================================================================
-   SECTION 5: 3D SCENE INITIALIZATION
+   SECTION 5: 3D SCENE
    ============================================================================= */
 init();
 animate();
@@ -285,6 +252,7 @@ function init() {
     scene.background = new THREE.Color(0x111111);
 
     camera = new THREE.PerspectiveCamera(30, container.clientWidth / container.clientHeight, 0.1, 100);
+    // Adjusted Camera Z for better fit in split screen
     camera.position.set(0, 0, 18); 
     camera.lookAt(0, 0, 0);
 
@@ -314,19 +282,14 @@ function init() {
     hintBox.visible = false;
     pivotGroup.add(hintBox);
 
-    createCube();
+    // LANDING: Create SOLVED Cube
+    createCube(true);
     
     // Initial Orientation (Isometric)
     pivotGroup.rotation.x = 0.5;
     pivotGroup.rotation.y = -0.6;
 
-    window.addEventListener('resize', () => {
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        renderer.setSize(w, h);
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-    });
+    window.addEventListener('resize', onWindowResize);
     
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
@@ -336,8 +299,17 @@ function init() {
     document.addEventListener("touchend", onInputEnd);
 }
 
-function createCube() {
-    // RESET: Clear scene
+function onWindowResize() {
+    const container = document.getElementById("canvas-container");
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+
+function createCube(isSolved = true) {
+    // Clear existing
     while(pivotGroup.children.length > 0) {
         if(pivotGroup.children[0] !== hintBox) pivotGroup.remove(pivotGroup.children[0]);
         else pivotGroup.children.shift(); 
@@ -348,40 +320,35 @@ function createCube() {
     const geo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
 
     for (let x = -1; x <= 1; x++)
-        for (let y = -1; y <= 1; y++)
-            for (let z = -1; z <= 1; z++) {
-                
-                const isCenter = (Math.abs(x)+Math.abs(y)+Math.abs(z))===1;
-                
-                // UNFILLED LOGIC:
-                // If it's a Center, paint it properly (so user knows orientation).
-                // If it's an Edge/Corner, paint it GHOST GREY initially.
-                
-                const mats = [
-                    new THREE.MeshPhongMaterial({ color: (isCenter && x==1) ? colors.R : colors.Ghost }),
-                    new THREE.MeshPhongMaterial({ color: (isCenter && x==-1)? colors.L : colors.Ghost }),
-                    new THREE.MeshPhongMaterial({ color: (isCenter && y==1) ? colors.U : colors.Ghost }),
-                    new THREE.MeshPhongMaterial({ color: (isCenter && y==-1)? colors.D : colors.Ghost }),
-                    new THREE.MeshPhongMaterial({ color: (isCenter && z==1) ? colors.F : colors.Ghost }),
-                    new THREE.MeshPhongMaterial({ color: (isCenter && z==-1)? colors.B : colors.Ghost })
-                ];
-                
-                const cube = new THREE.Mesh(geo, mats);
-                cube.position.set(x, y, z);
-                
-                // User Data 
-                cube.userData = { 
-                    ix: x, iy: y, iz: z, 
-                    isCenter: isCenter
-                };
-                
-                pivotGroup.add(cube);
-                cubes.push(cube);
-            }
+    for (let y = -1; y <= 1; y++)
+    for (let z = -1; z <= 1; z++) {
+        
+        // Define Materials
+        // If isSolved = true, use standard colors.
+        // If isSolved = false, use GHOST color for ALL faces (even centers).
+        
+        const defaultColor = isSolved ? null : colors.Ghost;
+
+        const mats = [
+            new THREE.MeshPhongMaterial({ color: defaultColor || (x==1?colors.R:colors.Core) }),
+            new THREE.MeshPhongMaterial({ color: defaultColor || (x==-1?colors.L:colors.Core) }),
+            new THREE.MeshPhongMaterial({ color: defaultColor || (y==1?colors.U:colors.Core) }),
+            new THREE.MeshPhongMaterial({ color: defaultColor || (y==-1?colors.D:colors.Core) }),
+            new THREE.MeshPhongMaterial({ color: defaultColor || (z==1?colors.F:colors.Core) }),
+            new THREE.MeshPhongMaterial({ color: defaultColor || (z==-1?colors.B:colors.Core) })
+        ];
+        
+        const cube = new THREE.Mesh(geo, mats);
+        cube.position.set(x, y, z);
+        cube.userData = { ix: x, iy: y, iz: z, isCenter: (Math.abs(x)+Math.abs(y)+Math.abs(z))===1 };
+        
+        pivotGroup.add(cube);
+        cubes.push(cube);
+    }
 }
 
 /* =============================================================================
-   SECTION 6: CAMERA MODE & LOGIC
+   SECTION 6: CAMERA LOGIC (GHOST & GUIDE)
    ============================================================================= */
 async function startCameraMode() {
     try {
@@ -391,35 +358,29 @@ async function startCameraMode() {
         videoEl.srcObject = stream;
         videoStream = stream;
         
-        // 1. Activate Split Screen
+        // 1. Activate Split Screen & Resize
         document.body.classList.add("cam-active");
         scannerUI.style.display = "flex";
         
-        // 2. Trigger Layout Refresh for 3D Canvas
-        setTimeout(() => {
-            const cont = document.getElementById("canvas-container");
-            renderer.setSize(cont.clientWidth, cont.clientHeight);
-            camera.aspect = cont.clientWidth / cont.clientHeight;
-            camera.updateProjectionMatrix();
-        }, 100);
+        // Force resize update after CSS transition (approx 100ms)
+        setTimeout(onWindowResize, 100);
 
-        // 3. Reset State
+        // 2. Reset State
         isCameraActive = true;
         scanIndex = 0;
         scannedFacesData = [];
         
-        // 4. Reset 3D Cube to "Front" View for the guide
-        gsapRotateTo(0, 0); 
+        // 3. Reset Cube to GHOST MODE (All Grey)
+        createCube(false);
+        
+        // 4. Set Initial Guide Rotation (Isometric 3-Face View)
+        gsapRotateTo(0.5, -0.6); 
         guideText.innerText = scanSequence[0].action;
         
-        // 5. Reset Colors to Ghost (Except Centers)
-        createCube(); 
-        
-        // 6. Start Loop
         requestAnimationFrame(processCameraFrame);
 
     } catch(e) {
-        alert("Camera Error: " + e.message + "\nCheck permissions.");
+        alert("Camera Error: " + e.message);
     }
 }
 
@@ -427,18 +388,8 @@ function stopCameraMode() {
     isCameraActive = false;
     document.body.classList.remove("cam-active");
     scannerUI.style.display = "none";
-    
-    if(videoStream) {
-        videoStream.getTracks().forEach(t => t.stop());
-    }
-    
-    // Restore Canvas Size
-    setTimeout(() => {
-        const cont = document.getElementById("canvas-container");
-        renderer.setSize(cont.clientWidth, cont.clientHeight);
-        camera.aspect = cont.clientWidth / cont.clientHeight;
-        camera.updateProjectionMatrix();
-    }, 100);
+    if(videoStream) videoStream.getTracks().forEach(t => t.stop());
+    setTimeout(onWindowResize, 100);
 }
 
 function processCameraFrame() {
@@ -450,8 +401,6 @@ function processCameraFrame() {
         ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
         
         const dots = document.getElementsByClassName("cam-dot");
-        
-        // Grid Calculation (Center 60%)
         const size = Math.min(canvasEl.width, canvasEl.height) * 0.6;
         const startX = (canvasEl.width - size)/2;
         const startY = (canvasEl.height - size)/2;
@@ -463,8 +412,6 @@ function processCameraFrame() {
             for(let col=0; col<3; col++) {
                 const cx = startX + col*cell + cell/2;
                 const cy = startY + row*cell + cell/2;
-                
-                // Sample 5x5
                 const p = ctx.getImageData(cx-2, cy-2, 5, 5).data;
                 let r=0,g=0,b=0;
                 for(let k=0; k<p.length; k+=4){ r+=p[k]; g+=p[k+1]; b+=p[k+2]; }
@@ -485,8 +432,7 @@ function processCameraFrame() {
             }
         }
         
-        // LIVE 3D MAPPING: Apply these colors to the virtual cube instantly
-        // Only if not animating (to allow the slow rotation to be seen cleanly)
+        // LIVE 3D MAPPING: Only if NOT animating the guide rotation
         if(!isAnimating) {
             applyLiveColorsTo3DCube(currentFrameColors);
         }
@@ -494,9 +440,8 @@ function processCameraFrame() {
     requestAnimationFrame(processCameraFrame);
 }
 
-// --- COLOR DETECTION (HSL) ---
+// --- COLOR DETECTION ---
 function getHSLColor(r, g, b) {
-    // RGB to HSL conversion
     r/=255; g/=255; b/=255;
     const max = Math.max(r,g,b), min = Math.min(r,g,b);
     let h, s, l = (max+min)/2;
@@ -514,28 +459,37 @@ function getHSLColor(r, g, b) {
     }
     h *= 360; s *= 100; l *= 100;
 
-    // 1. STRICT WHITE CHECK
     if(s < hslRules.white.sMax) return 'U';
-
-    // 2. CHECK HUES
     if(h >= hslRules.orange.hMin && h <= hslRules.orange.hMax && s > hslRules.orange.sMin) return 'L';
     if(h >= hslRules.yellow.hMin && h <= hslRules.yellow.hMax) return 'D';
     if(h >= hslRules.green.hMin && h <= hslRules.green.hMax) return 'F';
     if(h >= hslRules.blue.hMin && h <= hslRules.blue.hMax) return 'B';
-    
-    // Red wraps around
     if(h >= hslRules.red1.hMin || h <= hslRules.red2.hMax) return 'R';
-
-    return 'R'; // Fallback
+    return 'R'; 
 }
 
 function hexToString(hex) {
     return "#" + hex.toString(16).padStart(6, '0');
 }
 
-// --- LIVE MAPPING TO 3D CUBE ---
+// --- LIVE MAPPING ---
 function applyLiveColorsTo3DCube(colorsArr) {
-    // We paint the face currently pointing at Z+
+    // Determine which 9 facelets are pointing at the camera (Screen Z)
+    // IMPORTANT: Since we are in Isometric view, the "Face" might be angled.
+    // However, the user is looking at the camera feed.
+    // We assume the face the user is holding is the one we want to paint on the virtual cube's "Front-ish" side.
+    
+    // Simplification: We blindly paint the face that corresponds to the CURRENT SCAN INDEX logic.
+    // BUT since we allowed "Any Start", we don't know logical face.
+    // Visual approach: Find facelets with Normal matching the Camera Vector most closely.
+    
+    // Since pivotGroup is rotated, we un-rotate the Camera Vector (0,0,1) into Local Space?
+    // Or rotate Local Normals into World Space.
+    
+    // In our scan sequence, we rotate the cube so the target face is roughly facing Z.
+    // Exception: U and D might be angled.
+    // Let's use a wide threshold for dot product.
+    
     const camDir = new THREE.Vector3(0,0,1);
     let visibleFacelets = [];
     
@@ -543,9 +497,9 @@ function applyLiveColorsTo3DCube(colorsArr) {
         c.material.forEach((mat, matIdx) => {
             let normal = getLocalNormal(matIdx);
             normal.applyQuaternion(c.quaternion); 
-            normal.applyQuaternion(pivotGroup.quaternion); // Account for Group Animation
+            normal.applyQuaternion(pivotGroup.quaternion);
             
-            if(normal.dot(camDir) > 0.9) {
+            if(normal.dot(camDir) > 0.6) { // 0.6 threshold allows for isometric tilt
                 let wp = c.position.clone();
                 wp.applyQuaternion(pivotGroup.quaternion);
                 visibleFacelets.push({ mesh:c, matIdx:matIdx, x:wp.x, y:wp.y });
@@ -553,47 +507,45 @@ function applyLiveColorsTo3DCube(colorsArr) {
         });
     });
     
-    // Sort Grid: Top to Bottom, Left to Right
+    // Sort Top-Left to Bottom-Right visually
     visibleFacelets.sort((a,b) => (b.y - a.y) || (a.x - b.x));
     
+    // Paint if we found 9 candidates
     if(visibleFacelets.length === 9) {
         visibleFacelets.forEach((v, i) => {
-            if(!v.mesh.userData.isCenter) { 
-                v.mesh.material[v.matIdx].color.setHex(colors[colorsArr[i]]);
-                v.mesh.material[v.matIdx].needsUpdate = true;
-            }
+            // Paint EVERYTHING (including Centers) to 'U', 'R', etc.
+            // This replaces the 'Ghost' color live.
+            v.mesh.material[v.matIdx].color.setHex(colors[colorsArr[i]]);
+            v.mesh.material[v.matIdx].needsUpdate = true;
         });
     }
 }
 
 function getLocalNormal(matIdx) {
-    if(matIdx===0) return new THREE.Vector3(1,0,0);  
-    if(matIdx===1) return new THREE.Vector3(-1,0,0); 
-    if(matIdx===2) return new THREE.Vector3(0,1,0);  
-    if(matIdx===3) return new THREE.Vector3(0,-1,0); 
-    if(matIdx===4) return new THREE.Vector3(0,0,1);  
-    if(matIdx===5) return new THREE.Vector3(0,0,-1); 
+    if(matIdx===0) return new THREE.Vector3(1,0,0);
+    if(matIdx===1) return new THREE.Vector3(-1,0,0);
+    if(matIdx===2) return new THREE.Vector3(0,1,0);
+    if(matIdx===3) return new THREE.Vector3(0,-1,0);
+    if(matIdx===4) return new THREE.Vector3(0,0,1);
+    if(matIdx===5) return new THREE.Vector3(0,0,-1);
     return new THREE.Vector3(0,0,1);
 }
 
-// --- CAPTURE & ANIMATE (THE SLOW ROTATION) ---
+// --- CAPTURE & SLOW GUIDE ---
 function captureFace() {
-    if(isAnimating) return; // Prevent double click
+    if(isAnimating) return; 
 
     const dots = document.getElementsByClassName("cam-dot");
     let faceColors = [];
     for(let d of dots) faceColors.push(d.dataset.color);
     scannedFacesData.push(faceColors);
     
-    // Lock manual dots? No, reset for next face
     for(let d of dots) d.dataset.manual = "";
 
     scanIndex++;
     if(scanIndex < 6) {
         const step = scanSequence[scanIndex];
         guideText.innerText = step.action;
-        
-        // Trigger Slow Animation
         gsapRotateTo(step.rot.x, step.rot.y);
     } else {
         stopCameraMode();
@@ -601,7 +553,6 @@ function captureFace() {
     }
 }
 
-// Smooth rotation helper
 function gsapRotateTo(tx, ty) {
     isAnimating = true;
     const sx = pivotGroup.rotation.x;
@@ -611,41 +562,38 @@ function gsapRotateTo(tx, ty) {
     function loop() {
         let p = (Date.now()-st)/ANIMATION_SPEED;
         if(p<1) {
-            // Smooth EaseInOut
-            let e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+            let e = (p < 0.5) ? 2*p*p : -1+(4-2*p)*p; // EaseInOut
             pivotGroup.rotation.x = sx + (tx-sx)*e;
             pivotGroup.rotation.y = sy + (ty-sy)*e;
             requestAnimationFrame(loop);
         } else {
             pivotGroup.rotation.x = tx;
             pivotGroup.rotation.y = ty;
-            isAnimating = false; // Unlock
+            isAnimating = false;
         }
     }
     loop();
 }
 
 /* =============================================================================
-   SECTION 7: SOLVER MAPPING LOGIC
+   SECTION 7: MAPPING & SOLVER
    ============================================================================= */
 function solveFromScan() {
-    // Map based on Centers
     const faceMap = {}; 
     scannedFacesData.forEach(faceData => {
         const center = faceData[4];
         faceMap[center] = faceData;
     });
     
-    // Validation
     if(Object.keys(faceMap).length !== 6) {
         alert("Scan Error: Duplicate centers detected! Please rescan.");
+        // Reset to Ghost mode so they can try again
+        createCube(false);
         return;
     }
     
-    // Apply to Logical Cubes (so Hints work)
     applyScanToLogicalCubes(faceMap);
     
-    // Generate String for Min2Phase
     let cubeStr = "";
     ['U','R','F','D','L','B'].forEach(face => {
         cubeStr += faceMap[face].join("");
@@ -670,6 +618,11 @@ function applyScanToLogicalCubes(faceMap) {
                     c.material[matIdx].color.setHex(colors[colorsArr[i]]);
                     c.material[matIdx].needsUpdate = true;
                 }
+            } else {
+                // Also paint centers now to ensure full colored cube
+                let norm = getFaceNormal(key);
+                let matIdx = getVisibleFaceMatIndex(c, norm);
+                if(matIdx!==-1) c.material[matIdx].color.setHex(colors[colorsArr[i]]);
             }
         }
     });
@@ -678,7 +631,7 @@ function applyScanToLogicalCubes(faceMap) {
 }
 
 /* =============================================================================
-   SECTION 8: RECURSIVE LOGIC ENGINE (THE BRAIN)
+   SECTION 8: LOGIC ENGINE & HELPERS (Restored)
    ============================================================================= */
 function runLogicalAutofill(simMode) {
     let changed = true;
@@ -689,20 +642,18 @@ function runLogicalAutofill(simMode) {
         changed = false;
         iter++;
         
-        // 1. Analyze
         let pieces = [];
         cubes.forEach(c => {
             if(c.userData.isCenter) return;
             const exposed = [];
             const x=Math.round(c.position.x), y=Math.round(c.position.y), z=Math.round(c.position.z);
-            
             const check = (wx,wy,wz,fn) => {
                 if((wx!==0 && x===wx)||(wy!==0 && y===wy)||(wz!==0 && z===wz)) {
                     let mIdx = getVisibleFaceMatIndex(c, new THREE.Vector3(wx,wy,wz));
-                    if(mIdx !== -1) {
+                    if(mIdx!==-1) {
                         let m = c.material[mIdx];
-                        // If color is Ghost, it counts as null (unknown)
                         let hex = m.color.getHex();
+                        // Treat Ghost as Null
                         let key = (hex === colors.Ghost) ? null : getColorKey(hex);
                         exposed.push({ mat:m, color: key });
                     }
@@ -718,7 +669,6 @@ function runLogicalAutofill(simMode) {
             }
         });
 
-        // 2. Inventory
         let corn = [...ALL_CORNERS], edge = [...ALL_EDGES];
         pieces.forEach(p => {
             if(p.complete) {
@@ -733,7 +683,6 @@ function runLogicalAutofill(simMode) {
             }
         });
 
-        // 3. Deduction
         pieces.forEach(p => {
             if(p.complete || p.painted.length===0) return;
             let cands = [];
@@ -746,12 +695,9 @@ function runLogicalAutofill(simMode) {
                 if(fillP(p, cands[0], simMode)) { changed=true; filled++; }
             }
         });
-        
-        // 4. Reverse Deduction (Implicit in elimination above, but we can add strict inverse loop here if needed)
     }
     
     if(!simMode) calculatePredictiveHint(cubes); 
-    
     return filled;
 }
 
@@ -764,23 +710,14 @@ function fillP(p, cand, sim) {
             e.mat.color.setHex(colors[fill]);
             e.mat.needsUpdate = true;
             hit = true;
-            if(!sim) { 
-                autofillCount++; 
-                statsDiv.innerText = "Autofilled: "+autofillCount; 
-            }
+            if(!sim) { autofillCount++; statsDiv.innerText = "Autofilled: "+autofillCount; }
         }
     });
     return hit;
 }
 
-function calculatePredictiveHint(pieces) {
-    // Placeholder for hint visualization update
-    // Logic: Identify piece with lowest entropy (fewest candidates)
-}
+function calculatePredictiveHint() {} // Placeholder for advanced hint optimization
 
-/* =============================================================================
-   SECTION 9: HELPER FUNCTIONS (MATH & UTILS)
-   ============================================================================= */
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
     if(face === 'D') return new THREE.Vector3(0,-1,0);
@@ -810,7 +747,6 @@ function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax=Math.round(a.position.x), ay=Math.round(a.position.y), az=Math.round(a.position.z);
         const bx=Math.round(b.position.x), by=Math.round(b.position.y), bz=Math.round(b.position.z);
-        
         if(face === 'F') return (by - ay) || (ax - bx);
         if(face === 'B') return (by - ay) || (bx - ax);
         if(face === 'R') return (by - ay) || (bz - az);
@@ -881,7 +817,6 @@ function getCubeStateString() {
             if(cube) {
                 const matIdx = getVisibleFaceMatIndex(cube, f.norm);
                 const hex = cube.material[matIdx].color.getHex();
-                // Check if Ghost
                 if(hex === colors.Ghost) state += "?";
                 else {
                     const char = getColorKey(hex);
@@ -913,10 +848,9 @@ function updateStepStatus() {
 
 function nextMove() {
     if (!isAnimating && moveIndex < solutionMoves.length) {
-        updateDisplayMoves(); 
-        updateStepStatus();
         rotateFace(solutionMoves[moveIndex], false, () => {
             moveIndex++;
+            updateStepStatus();
             if(playInterval && moveIndex < solutionMoves.length) {
                 setTimeout(nextMove, MOVE_GAP);
             } else {
@@ -934,7 +868,6 @@ function nextMove() {
 function prevMove() {
     if (!isAnimating && moveIndex > 0) {
         moveIndex--;
-        updateDisplayMoves();
         updateStepStatus();
         rotateFace(solutionMoves[moveIndex], true);
     }
@@ -979,7 +912,6 @@ function onInputMove(e) {
         pivotGroup.rotation.y += dx * 0.006;
         pivotGroup.rotation.x += dy * 0.006;
         if(solutionMoves.length > 0) {
-            updateDisplayMoves();
             updateStepStatus();
         }
     }
@@ -1026,9 +958,11 @@ function handlePaint(clientX, clientY) {
     }
 }
 
-// Scramble Logic
+// Scramble Logic - Resets to Solved First
 function scrambleCube() {
     if (isAnimating) return;
+    // Fix: Force Cube to Solved State before Scrambling
+    createCube(true); 
     statusEl.innerText = "Scrambling...";
     const moves = Array.from({length: 20}, () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]);
     let i = 0;
