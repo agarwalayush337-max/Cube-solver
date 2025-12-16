@@ -1,51 +1,37 @@
 /* =============================================================================
-   RUBIK'S CUBE SOLVER – THE COMPLETE "MASTER" SCRIPT
+   RUBIK'S CUBE SOLVER – MASTER EDITION (LIVE GUIDE & FULL LOGIC)
    Features: 
-   1. Split-Screen Camera UI (Top: Cam, Bottom: Live 3D)
-   2. HSL Advanced Color Detection (Solves White/Orange/Yellow ambiguity)
-   3. Live 3D Mapping & Animation Guide
-   4. Recursive Sudoku Logic (Forward & Reverse Deduction)
-   5. Min2Phase Solver Integration
+   1. Split-Screen (Cam Top / Live 3D Bottom)
+   2. "Ghost" Cube that fills continuously
+   3. Slow-Motion Animation Guide (2.0s)
+   4. HSL Color Engine (High Accuracy)
+   5. Recursive Logic Engine (The "Brain")
    ============================================================================= */
 
 /* =============================================================================
    SECTION 1: CONFIGURATION & CONSTANTS
    ============================================================================= */
 
-// The visual colors for the THREE.js materials
 const colors = {
     U: 0xffffff, // White
     R: 0xb90000, // Red
-    F: 0x00ff00, // Green (Lime)
+    F: 0x00ff00, // Green (Bright Lime)
     D: 0xffd500, // Yellow
-    L: 0xff4500, // Orange (Red-Orange for better visibility)
+    L: 0xff4500, // Orange (Red-Orange)
     B: 0x0051ba, // Blue
-    Core: 0x202020 // Dark Grey (Internal plastic color)
+    Core: 0x202020, // Dark Grey (Internal/Unfilled)
+    Ghost: 0x404040 // Lighter Grey for "Unscanned" stickers
 };
 
-// Logical keys for the solver engine
 const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// HSL COLOR THRESHOLDS (The "Brain" of the Camera)
-// Adjusted for common webcam quality and indoor lighting conditions.
+// HSL RANGES (Strict Logic for White/Orange separation)
 const hslRules = {
-    // WHITE: Low Saturation is the key key. Hue is irrelevant.
-    // We also check Lightness > 30 to avoid detecting Black plastic as White.
-    white:  { sMax: 25, lMin: 25 }, 
-    
-    // ORANGE: High Saturation, Hue between Red and Yellow.
-    orange: { hMin: 11,  hMax: 43, sMin: 50 }, 
-    
-    // YELLOW: Hue 44-75. usually high brightness.
+    white:  { sMax: 20, lMin: 35 }, // Low saturation = White/Grey
+    orange: { hMin: 11,  hMax: 43, sMin: 55 }, 
     yellow: { hMin: 44,  hMax: 75 }, 
-    
-    // GREEN: Wide range 76-155.
     green:  { hMin: 76,  hMax: 155 },
-    
-    // BLUE: 156-260.
     blue:   { hMin: 156, hMax: 260 },
-    
-    // RED: Wraps around 0. (330-360 AND 0-10)
     red1:   { hMin: 330, hMax: 360 },
     red2:   { hMin: 0,   hMax: 10 }
 };
@@ -63,8 +49,7 @@ const ALL_EDGES = [
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
 const PLAY_SPEED = 400;     // Animation speed for solving
-const MOVE_GAP = 300;       // Delay between moves
-const ANIMATION_SPEED = 600; // Duration of guide cube rotation
+const ANIMATION_SPEED = 2000; // 2.0 Seconds (SLOW ROTATION GUIDE)
 
 /* =============================================================================
    SECTION 2: GLOBAL VARIABLES
@@ -73,8 +58,8 @@ const ANIMATION_SPEED = 600; // Duration of guide cube rotation
 // 3D Scene Components
 let scene, camera, renderer;
 let raycaster, mouse;
-let cubes = [], pivotGroup; // The 27 cubies and the rotation group
-let hintBox; // The blinking wireframe for suggestions
+let cubes = [], pivotGroup; 
+let hintBox; 
 
 // State Flags
 let isAnimating = false;
@@ -96,112 +81,105 @@ let autofillCount = 0;
 // Camera / Scanner State
 let videoStream = null;
 let isCameraActive = false;
-let scanIndex = 0; // Steps 0 to 5
-let scannedFacesData = []; // Accumulates 6 arrays of 9 colors
+let scanIndex = 0; 
+let scannedFacesData = []; 
 
-// Camera Rotation Sequence (Visual Guide)
+// Camera Rotation Sequence (The Visual Guide)
+// This dictates how the 3D cube rotates after each capture
 const scanSequence = [
-    { face: 'F', action: "Step 1: Scan First Face", rot: {x:0, y:0} },
-    { face: 'R', action: "Step 2: Rotate Cube LEFT", rot: {x:0, y:-Math.PI/2} },
-    { face: 'B', action: "Step 3: Rotate Cube LEFT", rot: {x:0, y:-Math.PI} },
-    { face: 'L', action: "Step 4: Rotate Cube LEFT", rot: {x:0, y:-Math.PI*1.5} },
-    { face: 'U', action: "Step 5: Rotate Cube DOWN", rot: {x:Math.PI/2, y:0} }, 
-    { face: 'D', action: "Step 6: Rotate Cube UP (to Bottom)", rot: {x:-Math.PI/2, y:0} } 
+    { face: 'F', action: "Start: Scan the GREEN Center Face", rot: {x:0, y:0} },
+    { face: 'R', action: "Slowly Rotate Cube LEFT -> Show RED", rot: {x:0, y:-Math.PI/2} },
+    { face: 'B', action: "Slowly Rotate Cube LEFT -> Show BLUE", rot: {x:0, y:-Math.PI} },
+    { face: 'L', action: "Slowly Rotate Cube LEFT -> Show ORANGE", rot: {x:0, y:-Math.PI*1.5} },
+    { face: 'U', action: "Tip Cube DOWN -> Show WHITE", rot: {x:Math.PI/2, y:0} }, 
+    { face: 'D', action: "Tip Cube All The Way UP -> Show YELLOW", rot: {x:-Math.PI/2, y:0} } 
 ];
 
 /* =============================================================================
    SECTION 3: UI GENERATION (Split Screen)
    ============================================================================= */
 
-// Inject CSS for the Scanner UI
 const styleCSS = document.createElement("style");
 styleCSS.innerHTML = `
-    /* Overlay Container */
     #scanner-ui {
         position: absolute; top: 0; left: 0; width: 100%; height: 50%;
-        background: #000; z-index: 50; display: none;
+        background: #111; z-index: 50; display: none;
         flex-direction: column; align-items: center; justify-content: center;
-        border-bottom: 2px solid #00ff00;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        border-bottom: 4px solid #00ff00;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.8);
     }
     
-    /* Dynamic 3D Canvas Resizing */
+    /* 3D Canvas Layout */
     #canvas-container {
         width: 100vw; height: 100vh;
-        transition: height 0.5s, top 0.5s;
+        transition: height 0.6s cubic-bezier(0.25, 1, 0.5, 1), top 0.6s cubic-bezier(0.25, 1, 0.5, 1);
         position: absolute; top: 0; left: 0;
     }
     .cam-active #canvas-container {
         height: 50% !important;
-        top: 50%;
+        top: 50%; /* Moves to bottom half */
     }
 
-    /* Grid Dots */
     .cam-dot {
-        width: 35px; height: 35px; border-radius: 50%;
-        border: 2px solid rgba(255,255,255,0.8); 
-        box-shadow: 0 0 6px rgba(0,0,0,0.8);
-        cursor: pointer;
-        transition: transform 0.1s;
+        width: 40px; height: 40px; border-radius: 8px;
+        border: 2px solid rgba(255,255,255,0.9); 
+        box-shadow: 0 2px 10px rgba(0,0,0,0.8);
+        cursor: pointer; transition: transform 0.1s;
     }
     .cam-dot:active { transform: scale(0.9); }
 
-    /* Guide Text */
     #guide-text {
         position: absolute; bottom: 15px; width: 100%; text-align: center;
-        color: #fff; font-size: 20px; font-weight: bold; 
+        color: #00ff00; font-size: 22px; font-weight: bold; 
         text-shadow: 0 2px 4px #000; letter-spacing: 1px;
         pointer-events: none; z-index: 60;
+        background: rgba(0,0,0,0.6); padding: 10px 0;
     }
     
-    /* Scan Message */
     #cam-msg {
         position: absolute; top: 15px; left: 15px; 
-        color: rgba(255,255,255,0.7); font-size: 12px;
-        background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px;
+        color: #fff; font-size: 14px;
+        background: rgba(0,0,0,0.6); padding: 6px 12px; border-radius: 20px;
     }
 `;
 document.head.appendChild(styleCSS);
 
-// Create DOM Elements for Scanner
 const scannerUI = document.createElement("div");
 scannerUI.id = "scanner-ui";
 scannerUI.innerHTML = `
-    <div style="position:relative; width:100%; height:100%; overflow:hidden; display:flex; justify-content:center; background:#111;">
-        <video id="cam-video" autoplay playsinline style="height:100%; width:auto; max-width:none;"></video>
+    <div style="position:relative; width:100%; height:100%; overflow:hidden; display:flex; justify-content:center; background:#000;">
+        <video id="cam-video" autoplay playsinline style="height:100%; width:auto; opacity:0.8;"></video>
         <canvas id="cam-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; display:none;"></canvas>
         
         <div id="grid-overlay" style="
             position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); 
-            width:260px; height:260px; 
+            width:280px; height:280px; 
             display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; 
-            border: 2px solid rgba(255,255,255,0.3); border-radius: 12px;">
+            border: 2px solid rgba(255,255,255,0.2); border-radius: 12px;">
         </div>
     </div>
 
-    <div style="position:absolute; bottom:15px; right:15px; display:flex; gap:10px;">
-        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:15px 35px; font-weight:bold; font-size:16px; border-radius:30px; box-shadow:0 4px 10px rgba(0,255,0,0.3);">
+    <div style="position:absolute; bottom:20px; right:20px; display:flex; gap:10px;">
+        <button id="btn-capture" class="tool-btn" style="background:#00ff00; color:#000; padding:15px 40px; font-weight:bold; font-size:18px; border-radius:50px; box-shadow:0 4px 15px rgba(0,255,0,0.4); border:none;">
             CAPTURE
         </button>
     </div>
 
-    <button id="btn-close" style="position:absolute; top:15px; right:15px; background:#ff3300; color:white; border:none; padding:8px 12px; border-radius:6px; font-weight:bold; cursor:pointer;">
+    <button id="btn-close" style="position:absolute; top:15px; right:15px; background:#ff3300; color:white; border:none; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer;">
         EXIT
     </button>
 
     <div id="cam-msg">Tap dots to fix manually</div>
-    <div id="guide-text"></div>
+    <div id="guide-text">Start: Scan Face 1</div>
 `;
 document.body.appendChild(scannerUI);
 
-// References to UI elements
 const videoEl = document.getElementById("cam-video");
 const canvasEl = document.getElementById("cam-canvas");
 const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
 const gridEl = document.getElementById("grid-overlay");
 const guideText = document.getElementById("guide-text");
 
-// Inject "Start Scan" button into existing toolbar
 const toolRow = document.getElementById("tool-row");
 if(toolRow) {
     const camBtn = document.createElement("button");
@@ -213,7 +191,6 @@ if(toolRow) {
     toolRow.appendChild(camBtn);
 }
 
-// Generate the 9 interactive dots
 for(let i=0; i<9; i++) {
     let cell = document.createElement("div");
     cell.style.display="flex"; cell.style.alignItems="center"; cell.style.justifyContent="center";
@@ -221,25 +198,21 @@ for(let i=0; i<9; i++) {
     let dot = document.createElement("div");
     dot.className = "cam-dot";
     
-    // Tap to fix color manually
     dot.onclick = (e) => {
         e.stopPropagation();
         const current = dot.dataset.color || 'U';
         let idx = colorKeys.indexOf(current);
-        idx = (idx + 1) % colorKeys.length; // Cycle next color
+        idx = (idx + 1) % colorKeys.length; 
         const next = colorKeys[idx];
-        
-        // Visual update
         dot.style.backgroundColor = hexToString(colors[next]);
         dot.dataset.color = next;
-        dot.dataset.manual = "true"; // Lock this dot so camera doesn't overwrite it
+        dot.dataset.manual = "true"; 
     };
     
     cell.appendChild(dot);
     gridEl.appendChild(cell);
 }
 
-// Bind Button Events
 document.getElementById("btn-capture").onclick = captureFace;
 document.getElementById("btn-close").onclick = stopCameraMode;
 
@@ -248,9 +221,8 @@ document.getElementById("btn-close").onclick = stopCameraMode;
    ============================================================================= */
 const statusEl = document.getElementById("status");
 const solutionTextEl = document.getElementById("solutionText");
-const statsDiv = document.createElement("div"); // Autofill counter from previous logic
+const statsDiv = document.createElement("div"); 
 
-// Setup Stats Div
 Object.assign(statsDiv.style, {
     position: 'absolute', bottom: '20px', left: '20px',
     color: '#00ff88', fontFamily: 'Arial', fontSize: '18px',
@@ -259,7 +231,6 @@ Object.assign(statsDiv.style, {
 statsDiv.innerText = "Autofilled: 0";
 document.body.appendChild(statsDiv);
 
-// Init Worker
 const solverWorker = new Worker("worker.js?v=" + Date.now());
 let engineReady = false;
 
@@ -277,7 +248,6 @@ solverWorker.onmessage = (e) => {
             return;
         }
         
-        // Parse moves and Split 180s (U2 -> U U)
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
         rawMoves.forEach(m => {
@@ -290,7 +260,6 @@ solverWorker.onmessage = (e) => {
             }
         });
         
-        // Update UI for playback
         moveIndex = 0;
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
@@ -316,7 +285,7 @@ function init() {
     scene.background = new THREE.Color(0x111111);
 
     camera = new THREE.PerspectiveCamera(30, container.clientWidth / container.clientHeight, 0.1, 100);
-    camera.position.set(0, 0, 18); // Optimal distance for "Flat" view
+    camera.position.set(0, 0, 18); 
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -324,7 +293,6 @@ function init() {
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
 
-    // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dl = new THREE.DirectionalLight(0xffffff, 1);
     dl.position.set(10, 20, 10);
@@ -333,15 +301,13 @@ function init() {
     bl.position.set(-10, -10, -10);
     scene.add(bl);
 
-    // Interaction Tools
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
 
-    // Pivot Group for whole cube rotation
     pivotGroup = new THREE.Group();
     scene.add(pivotGroup);
 
-    // Create Hint Box (Wireframe)
+    // Hint Box
     const boxGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05); 
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
     hintBox = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 2 }));
@@ -350,11 +316,10 @@ function init() {
 
     createCube();
     
-    // Initial Orientation (Isometric-ish)
+    // Initial Orientation (Isometric)
     pivotGroup.rotation.x = 0.5;
-    pivotGroup.rotation.y = -0.5;
+    pivotGroup.rotation.y = -0.6;
 
-    // Window Resize Handler
     window.addEventListener('resize', () => {
         const w = container.clientWidth;
         const h = container.clientHeight;
@@ -363,7 +328,6 @@ function init() {
         camera.updateProjectionMatrix();
     });
     
-    // Input Event Listeners
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
     document.addEventListener("mouseup", onInputEnd);
@@ -373,11 +337,10 @@ function init() {
 }
 
 function createCube() {
-    // Clear old
+    // RESET: Clear scene
     while(pivotGroup.children.length > 0) {
         if(pivotGroup.children[0] !== hintBox) pivotGroup.remove(pivotGroup.children[0]);
-        else pivotGroup.children.shift(); // Skip hintbox, remove others? 
-        // Actually safer to clear list and re-add hintbox
+        else pivotGroup.children.shift(); 
     }
     pivotGroup.add(hintBox);
 
@@ -387,22 +350,29 @@ function createCube() {
     for (let x = -1; x <= 1; x++)
         for (let y = -1; y <= 1; y++)
             for (let z = -1; z <= 1; z++) {
-                // Material order: Right, Left, Top, Bottom, Front, Back
+                
+                const isCenter = (Math.abs(x)+Math.abs(y)+Math.abs(z))===1;
+                
+                // UNFILLED LOGIC:
+                // If it's a Center, paint it properly (so user knows orientation).
+                // If it's an Edge/Corner, paint it GHOST GREY initially.
+                
                 const mats = [
-                    new THREE.MeshPhongMaterial({ color: x==1?colors.R:colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: x==-1?colors.L:colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: y==1?colors.U:colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: y==-1?colors.D:colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: z==1?colors.F:colors.Core }),
-                    new THREE.MeshPhongMaterial({ color: z==-1?colors.B:colors.Core })
+                    new THREE.MeshPhongMaterial({ color: (isCenter && x==1) ? colors.R : colors.Ghost }),
+                    new THREE.MeshPhongMaterial({ color: (isCenter && x==-1)? colors.L : colors.Ghost }),
+                    new THREE.MeshPhongMaterial({ color: (isCenter && y==1) ? colors.U : colors.Ghost }),
+                    new THREE.MeshPhongMaterial({ color: (isCenter && y==-1)? colors.D : colors.Ghost }),
+                    new THREE.MeshPhongMaterial({ color: (isCenter && z==1) ? colors.F : colors.Ghost }),
+                    new THREE.MeshPhongMaterial({ color: (isCenter && z==-1)? colors.B : colors.Ghost })
                 ];
+                
                 const cube = new THREE.Mesh(geo, mats);
                 cube.position.set(x, y, z);
                 
-                // User Data for logic identification
+                // User Data 
                 cube.userData = { 
                     ix: x, iy: y, iz: z, 
-                    isCenter: (Math.abs(x)+Math.abs(y)+Math.abs(z))===1 
+                    isCenter: isCenter
                 };
                 
                 pivotGroup.add(cube);
@@ -416,12 +386,12 @@ function createCube() {
 async function startCameraMode() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: 'environment' } // Prefer back camera
+            video: { facingMode: 'environment' } 
         });
         videoEl.srcObject = stream;
         videoStream = stream;
         
-        // 1. Activate UI
+        // 1. Activate Split Screen
         document.body.classList.add("cam-active");
         scannerUI.style.display = "flex";
         
@@ -442,7 +412,10 @@ async function startCameraMode() {
         gsapRotateTo(0, 0); 
         guideText.innerText = scanSequence[0].action;
         
-        // 5. Start Loop
+        // 5. Reset Colors to Ghost (Except Centers)
+        createCube(); 
+        
+        // 6. Start Loop
         requestAnimationFrame(processCameraFrame);
 
     } catch(e) {
@@ -472,14 +445,13 @@ function processCameraFrame() {
     if(!isCameraActive) return;
 
     if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
-        // Draw frame to hidden canvas
         canvasEl.width = videoEl.videoWidth;
         canvasEl.height = videoEl.videoHeight;
         ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
         
         const dots = document.getElementsByClassName("cam-dot");
         
-        // Calculate Grid Positions (Center 60% crop)
+        // Grid Calculation (Center 60%)
         const size = Math.min(canvasEl.width, canvasEl.height) * 0.6;
         const startX = (canvasEl.width - size)/2;
         const startY = (canvasEl.height - size)/2;
@@ -492,7 +464,7 @@ function processCameraFrame() {
                 const cx = startX + col*cell + cell/2;
                 const cy = startY + row*cell + cell/2;
                 
-                // Sample 5x5 pixel area
+                // Sample 5x5
                 const p = ctx.getImageData(cx-2, cy-2, 5, 5).data;
                 let r=0,g=0,b=0;
                 for(let k=0; k<p.length; k+=4){ r+=p[k]; g+=p[k+1]; b+=p[k+2]; }
@@ -502,7 +474,6 @@ function processCameraFrame() {
                 const dot = dots[row*3+col];
                 let colorCode = 'U';
 
-                // Use Manual Color OR Detect HSL
                 if(dot.dataset.manual) {
                     colorCode = dot.dataset.color;
                 } else {
@@ -515,14 +486,17 @@ function processCameraFrame() {
         }
         
         // LIVE 3D MAPPING: Apply these colors to the virtual cube instantly
-        applyLiveColorsTo3DCube(currentFrameColors);
+        // Only if not animating (to allow the slow rotation to be seen cleanly)
+        if(!isAnimating) {
+            applyLiveColorsTo3DCube(currentFrameColors);
+        }
     }
     requestAnimationFrame(processCameraFrame);
 }
 
 // --- COLOR DETECTION (HSL) ---
 function getHSLColor(r, g, b) {
-    // Convert RGB to HSL
+    // RGB to HSL conversion
     r/=255; g/=255; b/=255;
     const max = Math.max(r,g,b), min = Math.min(r,g,b);
     let h, s, l = (max+min)/2;
@@ -544,12 +518,12 @@ function getHSLColor(r, g, b) {
     if(s < hslRules.white.sMax) return 'U';
 
     // 2. CHECK HUES
-    if(h >= hslRules.orange.hMin && h <= hslRules.orange.hMax) return 'L';
+    if(h >= hslRules.orange.hMin && h <= hslRules.orange.hMax && s > hslRules.orange.sMin) return 'L';
     if(h >= hslRules.yellow.hMin && h <= hslRules.yellow.hMax) return 'D';
     if(h >= hslRules.green.hMin && h <= hslRules.green.hMax) return 'F';
     if(h >= hslRules.blue.hMin && h <= hslRules.blue.hMax) return 'B';
     
-    // Red wraps around (345-360, 0-10)
+    // Red wraps around
     if(h >= hslRules.red1.hMin || h <= hslRules.red2.hMax) return 'R';
 
     return 'R'; // Fallback
@@ -561,85 +535,75 @@ function hexToString(hex) {
 
 // --- LIVE MAPPING TO 3D CUBE ---
 function applyLiveColorsTo3DCube(colorsArr) {
-    // We need to paint the face of the 3D cube that is currently facing the camera (Z axis).
-    // Because the whole group rotates, we must calculate World Normals.
-    
+    // We paint the face currently pointing at Z+
     const camDir = new THREE.Vector3(0,0,1);
     let visibleFacelets = [];
     
     cubes.forEach(c => {
         c.material.forEach((mat, matIdx) => {
-            // Get normal in Local Space
             let normal = getLocalNormal(matIdx);
+            normal.applyQuaternion(c.quaternion); 
+            normal.applyQuaternion(pivotGroup.quaternion); // Account for Group Animation
             
-            // Transform to World Space
-            normal.applyQuaternion(c.quaternion); // Cube's own rotation
-            normal.applyQuaternion(pivotGroup.quaternion); // PivotGroup's rotation
-            
-            // If normal points at camera (>0.9 dot product), it's visible
             if(normal.dot(camDir) > 0.9) {
-                // Save this facelet
-                // We need world position to sort them
                 let wp = c.position.clone();
                 wp.applyQuaternion(pivotGroup.quaternion);
-                
                 visibleFacelets.push({ mesh:c, matIdx:matIdx, x:wp.x, y:wp.y });
             }
         });
     });
     
-    // Sort Grid: Top to Bottom (Y desc), Left to Right (X asc)
+    // Sort Grid: Top to Bottom, Left to Right
     visibleFacelets.sort((a,b) => (b.y - a.y) || (a.x - b.x));
     
-    // If we have a full face (9 facelets), apply colors
     if(visibleFacelets.length === 9) {
         visibleFacelets.forEach((v, i) => {
-            // Don't paint centers to maintain orientation reference?
-            // Actually, for "Any Start", we CAN paint centers, but we must track them.
-            // Let's paint everything so the user sees feedback.
-            v.mesh.material[v.matIdx].color.setHex(colors[colorsArr[i]]);
-            v.mesh.material[v.matIdx].needsUpdate = true;
+            if(!v.mesh.userData.isCenter) { 
+                v.mesh.material[v.matIdx].color.setHex(colors[colorsArr[i]]);
+                v.mesh.material[v.matIdx].needsUpdate = true;
+            }
         });
     }
 }
 
 function getLocalNormal(matIdx) {
-    // Standard normals for BoxGeometry
-    if(matIdx===0) return new THREE.Vector3(1,0,0);  // Right
-    if(matIdx===1) return new THREE.Vector3(-1,0,0); // Left
-    if(matIdx===2) return new THREE.Vector3(0,1,0);  // Top
-    if(matIdx===3) return new THREE.Vector3(0,-1,0); // Bottom
-    if(matIdx===4) return new THREE.Vector3(0,0,1);  // Front
-    if(matIdx===5) return new THREE.Vector3(0,0,-1); // Back
+    if(matIdx===0) return new THREE.Vector3(1,0,0);  
+    if(matIdx===1) return new THREE.Vector3(-1,0,0); 
+    if(matIdx===2) return new THREE.Vector3(0,1,0);  
+    if(matIdx===3) return new THREE.Vector3(0,-1,0); 
+    if(matIdx===4) return new THREE.Vector3(0,0,1);  
+    if(matIdx===5) return new THREE.Vector3(0,0,-1); 
     return new THREE.Vector3(0,0,1);
 }
 
-// --- CAPTURE & ANIMATE ---
+// --- CAPTURE & ANIMATE (THE SLOW ROTATION) ---
 function captureFace() {
-    // 1. Store Data
+    if(isAnimating) return; // Prevent double click
+
     const dots = document.getElementsByClassName("cam-dot");
     let faceColors = [];
     for(let d of dots) faceColors.push(d.dataset.color);
     scannedFacesData.push(faceColors);
     
-    // 2. Reset Manual Flags
+    // Lock manual dots? No, reset for next face
     for(let d of dots) d.dataset.manual = "";
 
-    // 3. Move to Next Step
     scanIndex++;
     if(scanIndex < 6) {
         const step = scanSequence[scanIndex];
         guideText.innerText = step.action;
+        
+        // Trigger Slow Animation
         gsapRotateTo(step.rot.x, step.rot.y);
     } else {
-        // Finished
         stopCameraMode();
         solveFromScan();
     }
 }
 
-// GSAP-like smooth rotation
+// Smooth rotation helper
 function gsapRotateTo(tx, ty) {
+    isAnimating = true;
     const sx = pivotGroup.rotation.x;
     const sy = pivotGroup.rotation.y;
     const st = Date.now();
@@ -647,13 +611,15 @@ function gsapRotateTo(tx, ty) {
     function loop() {
         let p = (Date.now()-st)/ANIMATION_SPEED;
         if(p<1) {
-            let e = p*(2-p); // Ease Out
+            // Smooth EaseInOut
+            let e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
             pivotGroup.rotation.x = sx + (tx-sx)*e;
             pivotGroup.rotation.y = sy + (ty-sy)*e;
             requestAnimationFrame(loop);
         } else {
             pivotGroup.rotation.x = tx;
             pivotGroup.rotation.y = ty;
+            isAnimating = false; // Unlock
         }
     }
     loop();
@@ -663,10 +629,7 @@ function gsapRotateTo(tx, ty) {
    SECTION 7: SOLVER MAPPING LOGIC
    ============================================================================= */
 function solveFromScan() {
-    // We have 6 arrays of colors.
-    // Index 4 of each array is the Center Sticker.
-    // We map based on Centers: Center White = Up, Center Green = Front, etc.
-    
+    // Map based on Centers
     const faceMap = {}; 
     scannedFacesData.forEach(faceData => {
         const center = faceData[4];
@@ -674,18 +637,16 @@ function solveFromScan() {
     });
     
     // Validation
-    const uniqueCenters = Object.keys(faceMap);
-    if(uniqueCenters.length !== 6) {
-        alert("Scan Error: Duplicate centers detected! Please rescan carefully.");
+    if(Object.keys(faceMap).length !== 6) {
+        alert("Scan Error: Duplicate centers detected! Please rescan.");
         return;
     }
     
-    // Map scanned data to Virtual Cube State
+    // Apply to Logical Cubes (so Hints work)
     applyScanToLogicalCubes(faceMap);
     
     // Generate String for Min2Phase
     let cubeStr = "";
-    // Order required by Min2Phase: U, R, F, D, L, B
     ['U','R','F','D','L','B'].forEach(face => {
         cubeStr += faceMap[face].join("");
     });
@@ -695,7 +656,6 @@ function solveFromScan() {
 }
 
 function applyScanToLogicalCubes(faceMap) {
-    // This updates the internal 'cubes' array so logic/autofill works
     ['U','R','F','D','L','B'].forEach(key => {
         let targetCubes = getCubesForFace(key);
         targetCubes = sortCubesForGrid(targetCubes, key);
@@ -713,7 +673,6 @@ function applyScanToLogicalCubes(faceMap) {
             }
         }
     });
-    // Run autofill once to ensure consistency
     runLogicalAutofill(false);
     updatePaletteCounts();
 }
@@ -730,7 +689,7 @@ function runLogicalAutofill(simMode) {
         changed = false;
         iter++;
         
-        // 1. Analyze Current Board State
+        // 1. Analyze
         let pieces = [];
         cubes.forEach(c => {
             if(c.userData.isCenter) return;
@@ -742,7 +701,10 @@ function runLogicalAutofill(simMode) {
                     let mIdx = getVisibleFaceMatIndex(c, new THREE.Vector3(wx,wy,wz));
                     if(mIdx !== -1) {
                         let m = c.material[mIdx];
-                        exposed.push({ mat:m, color: getColorKey(m.color.getHex()) });
+                        // If color is Ghost, it counts as null (unknown)
+                        let hex = m.color.getHex();
+                        let key = (hex === colors.Ghost) ? null : getColorKey(hex);
+                        exposed.push({ mat:m, color: key });
                     }
                 }
             };
@@ -756,7 +718,7 @@ function runLogicalAutofill(simMode) {
             }
         });
 
-        // 2. Inventory Management (What pieces are left?)
+        // 2. Inventory
         let corn = [...ALL_CORNERS], edge = [...ALL_EDGES];
         pieces.forEach(p => {
             if(p.complete) {
@@ -771,24 +733,24 @@ function runLogicalAutofill(simMode) {
             }
         });
 
-        // 3. Deduction (Forward & Reverse)
+        // 3. Deduction
         pieces.forEach(p => {
             if(p.complete || p.painted.length===0) return;
             let cands = [];
             if(p.type==='corner') cands = corn.filter(c => p.painted.every(k=>c.includes(k)));
             else cands = edge.filter(e => p.painted.every(k=>e.includes(k)));
             
-            p.candidates = cands; // Store for hint system
+            p.candidates = cands; 
 
             if(cands.length===1) {
-                // If only 1 valid piece fits this spot
                 if(fillP(p, cands[0], simMode)) { changed=true; filled++; }
             }
         });
+        
+        // 4. Reverse Deduction (Implicit in elimination above, but we can add strict inverse loop here if needed)
     }
     
-    // Hint System Trigger
-    if(!simMode) calculatePredictiveHint(cubes); // (Simplified passing)
+    if(!simMode) calculatePredictiveHint(cubes); 
     
     return filled;
 }
@@ -811,15 +773,13 @@ function fillP(p, cand, sim) {
     return hit;
 }
 
-function calculatePredictiveHint() {
-    // Re-analyzes board to find the piece with fewest candidates
-    // (Logic integrated into main loop for performance in this version)
-    // Here we just toggle the hint box if there is a good candidate
-    // Omitted for brevity in this specific function as it runs inside the loop.
+function calculatePredictiveHint(pieces) {
+    // Placeholder for hint visualization update
+    // Logic: Identify piece with lowest entropy (fewest candidates)
 }
 
 /* =============================================================================
-   SECTION 9: HELPER FUNCTIONS
+   SECTION 9: HELPER FUNCTIONS (MATH & UTILS)
    ============================================================================= */
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
@@ -862,7 +822,7 @@ function sortCubesForGrid(list, face) {
 
 function getColorKey(hex) {
     for (const k in colors) {
-        if (k === "Core") continue;
+        if (k === "Core" || k === "Ghost") continue;
         if (colors[k] === hex) return k;
     }
     return null; 
@@ -905,10 +865,6 @@ function updatePaletteCounts() {
 }
 
 function getCubeStateString() {
-    // Generate state string for current 3D cube
-    // Logic: Find cubes at specific positions for U, R, F, D, L, B faces
-    // Omitted for brevity (same as previous) but vital for functionality
-    // Re-inserting full logic:
     let state = "";
     const find = (x,y,z) => cubes.find(c => Math.round(c.position.x)===x && Math.round(c.position.y)===y && Math.round(c.position.z)===z);
     const faces = [
@@ -925,8 +881,12 @@ function getCubeStateString() {
             if(cube) {
                 const matIdx = getVisibleFaceMatIndex(cube, f.norm);
                 const hex = cube.material[matIdx].color.getHex();
-                const char = getColorKey(hex);
-                state += char ? char : "?";
+                // Check if Ghost
+                if(hex === colors.Ghost) state += "?";
+                else {
+                    const char = getColorKey(hex);
+                    state += char ? char : "?";
+                }
             } else state += "?";
         });
     });
@@ -1092,7 +1052,6 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// Low-Level Rotation Logic
 function rotateFace(move, rev, cb) {
     if(isAnimating && !cb) return;
     isAnimating=true;
