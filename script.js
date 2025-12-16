@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – HINT SYSTEM & AUTOFILL STATS
+   RUBIK'S CUBE SOLVER – PREDICTIVE HINT SYSTEM
    ========================================================= */
 
 /* =======================
@@ -15,7 +15,6 @@ const colors = {
     Core: 0x202020 // Dark Grey (Internal)
 };
 
-// All 20 Valid Movable Pieces
 const ALL_CORNERS = [
     ["U","R","F"], ["U","F","L"], ["U","L","B"], ["U","B","R"],
     ["D","F","R"], ["D","L","F"], ["D","B","L"], ["D","R","B"]
@@ -27,8 +26,8 @@ const ALL_EDGES = [
 ];
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
-const PLAY_SPEED = 400; // Speed of the rotation itself
-const MOVE_GAP = 300;   // Delay between moves (Gap)
+const PLAY_SPEED = 400; 
+const MOVE_GAP = 300;   
 
 /* =======================
    GLOBAL STATE
@@ -36,17 +35,17 @@ const MOVE_GAP = 300;   // Delay between moves (Gap)
 let scene, camera, renderer;
 let raycaster, mouse;
 let cubes = [], pivotGroup;
-let hintBox; // The blinking wireframe
+let hintBox; 
 
 let isAnimating = false;
 let paintColor = "U";
 
-let solutionMoves = []; // logical moves
-let displayMoves = [];  // visual moves
+let solutionMoves = []; 
+let displayMoves = [];  
 let moveIndex = 0;
 let playInterval = null;
 
-let autofillCount = 0; // Stats counter
+let autofillCount = 0; 
 
 let isMouseDown = false;
 let isDragging = false;
@@ -54,12 +53,11 @@ let startMouse = { x: 0, y: 0 };
 let lastMouse = { x: 0, y: 0 };
 
 /* =======================
-   UI ELEMENTS (Dynamic)
+   UI ELEMENTS
 ======================= */
 const statusEl = document.getElementById("status");
 const solutionTextEl = document.getElementById("solutionText");
 
-// Create Autofill Counter Display
 const statsDiv = document.createElement("div");
 statsDiv.style.position = "absolute";
 statsDiv.style.bottom = "20px";
@@ -101,7 +99,6 @@ solverWorker.onmessage = (e) => {
              return;
         }
 
-        // --- SPLIT 180 MOVES ---
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
         
@@ -122,7 +119,6 @@ solverWorker.onmessage = (e) => {
         updateDisplayMoves();
         updateStepStatus();
         
-        // Hide hint when solved
         if(hintBox) hintBox.visible = false;
     }
     if (d.type === "error") {
@@ -143,7 +139,6 @@ function init() {
     scene.background = new THREE.Color(0x111111);
 
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-    // Flat view
     camera.position.set(0, 0, 16); 
     camera.lookAt(0, 0, 0);
 
@@ -166,10 +161,9 @@ function init() {
     pivotGroup = new THREE.Group();
     scene.add(pivotGroup);
 
-    // Create Hint Box (Wireframe)
-    const boxGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05); // Slightly larger than cube
+    // Hint Box (Magenta Wireframe)
+    const boxGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05); 
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
-    // Magenta color for high visibility
     hintBox = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 2 }));
     hintBox.visible = false;
     pivotGroup.add(hintBox);
@@ -190,7 +184,6 @@ function init() {
 }
 
 function createCube() {
-    // Clear existing cubes but keep hintBox
     const children = [...pivotGroup.children];
     children.forEach(c => {
         if(c !== hintBox) pivotGroup.remove(c);
@@ -260,21 +253,38 @@ function getVisibleFaceMatIndex(cube, worldDir) {
 }
 
 /* =======================
+   STATE MANAGEMENT (For Simulation)
+======================= */
+function saveBoardState() {
+    return cubes.map(c => c.material.map(m => m.color.getHex()));
+}
+
+function restoreBoardState(saved) {
+    cubes.forEach((c, i) => {
+        c.material.forEach((m, j) => {
+            m.color.setHex(saved[i][j]);
+        });
+    });
+}
+
+/* =======================
    RECURSIVE LOGICAL FILL
 ======================= */
-function runLogicalAutofill() {
+// Now accepts a simulationMode flag.
+// If true: doesn't update UI, just returns count of filled blocks.
+function runLogicalAutofill(simulationMode = false) {
     let loopChanges = true;
     let iteration = 0;
+    let filledInThisRun = 0;
     
-    // We analyze pieces to find hints later
     let boardAnalysis = []; 
 
     while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
-        
-        boardAnalysis = []; // Reset analysis each loop
+        boardAnalysis = []; 
 
+        // 1. Snapshot board state
         const getExposedFaces = (c) => {
             const x = Math.round(c.position.x);
             const y = Math.round(c.position.y);
@@ -287,7 +297,7 @@ function runLogicalAutofill() {
                     if (matIdx !== -1) {
                         const mat = c.material[matIdx];
                         const k = getColorKey(mat.color.getHex());
-                        exposed.push({ dir: faceName, mat: mat, color: k });
+                        exposed.push({ dir: faceName, mat: mat, color: k, matIndex: matIdx });
                     }
                 }
             };
@@ -309,6 +319,7 @@ function runLogicalAutofill() {
             });
         });
 
+        // 2. Inventory Management
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
@@ -325,45 +336,55 @@ function runLogicalAutofill() {
             }
         });
 
-        // Forward Logic
+        // 3. Deduction
         boardAnalysis.forEach(p => {
             if (p.isComplete || p.painted.length === 0) return; 
             let candidates = [];
             if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
             else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
             
-            // Store candidate count for hint logic
-            p.candidateCount = candidates.length; 
+            p.possibleCandidates = candidates; // Store for hint system
 
             if (candidates.length === 1) {
-                if(fillPiece(p, candidates[0])) loopChanges = true;
+                if(fillPiece(p, candidates[0], simulationMode)) {
+                    loopChanges = true;
+                    filledInThisRun++;
+                }
             }
         });
 
-        // Reverse Logic
         if (!loopChanges) {
             availableCorners.forEach(cand => {
                 const compatiblePieces = boardAnalysis.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
                 if (compatiblePieces.length === 1) {
-                    if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
+                    if(fillPiece(compatiblePieces[0], cand, simulationMode)) {
+                        loopChanges = true;
+                        filledInThisRun++;
+                    }
                 }
             });
             availableEdges.forEach(cand => {
                 const compatiblePieces = boardAnalysis.filter(p => p.type === 'edge' && !p.isComplete && p.painted.every(col => cand.includes(col)));
                 if (compatiblePieces.length === 1) {
-                    if(fillPiece(compatiblePieces[0], cand)) loopChanges = true;
+                    if(fillPiece(compatiblePieces[0], cand, simulationMode)) {
+                        loopChanges = true;
+                        filledInThisRun++;
+                    }
                 }
             });
         }
     }
     
-    // Logic Done. If stuck, calculate Hint.
-    calculateHint(boardAnalysis);
+    // Only calculate hint if NOT in simulation mode
+    if(!simulationMode) {
+        calculatePredictiveHint(boardAnalysis);
+        updatePaletteCounts();
+    }
 
-    if(iteration > 1) updatePaletteCounts();
+    return filledInThisRun;
 }
 
-function fillPiece(p, candidateColors) {
+function fillPiece(p, candidateColors, isSimulation) {
     let filledSomething = false;
     const missing = candidateColors.filter(c => !p.painted.includes(c));
     p.faces.forEach(f => {
@@ -373,40 +394,84 @@ function fillPiece(p, candidateColors) {
             f.mat.needsUpdate = true;
             filledSomething = true;
             
-            // Increment Autofill Counter
-            autofillCount++;
-            statsDiv.innerText = "Autofilled: " + autofillCount;
+            if(!isSimulation) {
+                autofillCount++;
+                statsDiv.innerText = "Autofilled: " + autofillCount;
+            }
         }
     });
     return filledSomething;
 }
 
 /* =======================
-   HINT SYSTEM (BLINKING BORDER)
+   PREDICTIVE HINT SYSTEM (The "Tiebreaker" Logic)
 ======================= */
-function calculateHint(boardPieces) {
-    // 1. Filter pieces that are started but not finished
-    let possibleHints = boardPieces.filter(p => !p.isComplete && p.painted.length > 0);
-    
-    // 2. Sort by "Fewest Candidates" (Lowest Entropy)
-    // We prefer a piece that has only 2 options over one that has 5.
-    possibleHints.sort((a, b) => {
-        // If candidateCount wasn't set, treat as high
-        let ca = a.candidateCount || 99;
-        let cb = b.candidateCount || 99;
-        return ca - cb;
+function calculatePredictiveHint(boardPieces) {
+    // 1. Identify "Testable" pieces: Not complete, but has valid candidates
+    let candidates = boardPieces.filter(p => 
+        !p.isComplete && 
+        p.painted.length > 0 && 
+        p.possibleCandidates && 
+        p.possibleCandidates.length > 0
+    );
+
+    if (candidates.length === 0) {
+        hintBox.visible = false;
+        return;
+    }
+
+    let bestScore = -1;
+    let bestPiece = null;
+
+    // Save real state before simulation
+    const originalState = saveBoardState();
+
+    // 2. Simulation Loop
+    // For every piece that needs a hint...
+    candidates.forEach(piece => {
+        // We only test the FIRST candidate combination. 
+        // If *any* valid choice triggers a chain reaction, this piece is a linchpin.
+        const testCandidate = piece.possibleCandidates[0]; // e.g., ["U", "R", "F"]
+        
+        // Find which face is currently empty on this piece
+        let emptyFace = piece.faces.find(f => f.color === null);
+        
+        if (emptyFace && testCandidate) {
+            // Find a color from the candidate that isn't painted yet
+            const neededColors = testCandidate.filter(c => !piece.painted.includes(c));
+            if(neededColors.length > 0) {
+                const testColor = neededColors[0];
+                
+                // SIMULATE: Paint it
+                emptyFace.mat.color.setHex(colors[testColor]);
+                
+                // RUN ENGINE: See how many blocks fill automatically
+                const reactionScore = runLogicalAutofill(true); // true = Simulation Mode
+
+                // Evaluate
+                if (reactionScore > bestScore) {
+                    bestScore = reactionScore;
+                    bestPiece = piece;
+                }
+                
+                // RESTORE: Reset board for next test
+                restoreBoardState(originalState);
+            }
+        }
     });
 
-    if (possibleHints.length > 0) {
-        // We found a good candidate
-        const bestPiece = possibleHints[0];
-        
-        // Move the hint wireframe to this cube's position
+    // 3. Highlight the Winner
+    if (bestPiece) {
         hintBox.position.copy(bestPiece.obj.position);
         hintBox.quaternion.copy(bestPiece.obj.quaternion);
         hintBox.visible = true;
+    } else if (candidates.length > 0) {
+        // Fallback: If no chain reaction found, just highlight the one with fewest candidates
+        candidates.sort((a,b) => a.possibleCandidates.length - b.possibleCandidates.length);
+        hintBox.position.copy(candidates[0].obj.position);
+        hintBox.quaternion.copy(candidates[0].obj.quaternion);
+        hintBox.visible = true;
     } else {
-        // No hints (either empty board or full board)
         hintBox.visible = false;
     }
 }
@@ -431,12 +496,12 @@ function handlePaint(clientX, clientY) {
         }
         const matIndex = hit.face.materialIndex;
         
-        // Only update if color is actually changing
         if (obj.material[matIndex].color.getHex() !== colors[paintColor]) {
              obj.material[matIndex].color.setHex(colors[paintColor]);
              obj.material[matIndex].needsUpdate = true;
-             runLogicalAutofill();
-             updatePaletteCounts();
+             
+             // This runs the autofill AND calculates the next hint
+             runLogicalAutofill(false); 
         }
     }
 }
@@ -453,7 +518,6 @@ function clearCube() {
     document.getElementById("action-controls").style.display = "flex";
     document.getElementById("playback-controls").style.display = "none";
     
-    // Reset Stats & Hints
     autofillCount = 0;
     statsDiv.innerText = "Autofilled: 0";
     hintBox.visible = false;
@@ -550,9 +614,8 @@ function rotateFace(move, reverse=false, onComplete=null) {
             snapToGrid();
             isAnimating = false;
             
-            // Re-calculate Hint because rotation moved things!
-            // We run a "dummy" autofill just to update positions for the hint
-            runLogicalAutofill(); 
+            // Recalculate Logic to move Hint to correct location
+            runLogicalAutofill(false);
             
             if(onComplete) onComplete();
         }
@@ -763,13 +826,11 @@ function onInputEnd(e) {
 function animate() {
     requestAnimationFrame(animate);
     
-    // Blinking effect for the hint box
+    // Continuous Pulsing Effect for Hint Box
     if (hintBox && hintBox.visible) {
         const time = Date.now() * 0.005; 
-        // Oscillate visible on/off or opacity?
-        // Wireframes don't support opacity well without transparent:true
-        // So we toggle visibility every 500ms
-        hintBox.visible = Math.floor(Date.now() / 500) % 2 === 0;
+        const scale = 1.05 + Math.sin(time * 2) * 0.05; // Pulse scale between 1.0 and 1.1
+        hintBox.scale.set(scale, scale, scale);
     }
 
     renderer.render(scene, camera);
