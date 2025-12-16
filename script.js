@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (ULTIMATE)
+   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (PERFECT SCAN)
    ========================================================= */
 
 /* =======================
@@ -107,6 +107,9 @@ guideStyle.innerHTML = `
         position: relative;
         overflow: hidden;
         border-bottom: 4px solid #333;
+        display: flex;
+        justify-content: center;
+        align-items: center;
     }
     .scan-bottom {
         flex: 1;
@@ -118,7 +121,6 @@ guideStyle.innerHTML = `
         background: #151515;
     }
     
-    /* Wrapper handles the isometric tilt (3 faces visible) */
     .cube-wrapper {
         width: 150px;
         height: 150px;
@@ -127,13 +129,11 @@ guideStyle.innerHTML = `
         transform: rotateX(-20deg) rotateY(-25deg); 
     }
 
-    /* Inner cube handles the rotation animations */
     .cube-preview {
         width: 100%;
         height: 100%;
         position: absolute;
         transform-style: preserve-3d;
-        /* SLOW ROTATION: 2.0s for smooth visibility */
         transition: transform 2.0s cubic-bezier(0.25, 1, 0.5, 1);
     }
     
@@ -159,7 +159,6 @@ guideStyle.innerHTML = `
         transition: background-color 0.2s;
     }
 
-    /* Standard Face Mappings */
     .p-front  { transform: rotateY(  0deg) translateZ(75px); }
     .p-right  { transform: rotateY( 90deg) translateZ(75px); }
     .p-back   { transform: rotateY(180deg) translateZ(75px); }
@@ -190,10 +189,22 @@ guideStyle.innerHTML = `
         box-shadow: 0 6px 15px rgba(0,0,0,0.4);
         letter-spacing: 1px;
     }
+    
+    /* Responsive Grid Overlay */
+    #grid-overlay {
+        position: absolute;
+        width: min(70vw, 70vh); /* Responsive Size */
+        height: min(70vw, 70vh);
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-rows: 1fr 1fr 1fr;
+        border: 3px solid rgba(0,255,136,0.6);
+        box-shadow: 0 0 30px rgba(0,0,0,0.7);
+        z-index: 5;
+    }
 `;
 document.head.appendChild(guideStyle);
 
-// Camera Overlay HTML Structure
 const camOverlay = document.createElement("div");
 camOverlay.id = "cam-overlay";
 Object.assign(camOverlay.style, {
@@ -212,16 +223,22 @@ camOverlay.innerHTML = `
             <video id="cam-video" autoplay playsinline style="height:100%; width:100%; object-fit:cover;"></video>
             <canvas id="cam-canvas" style="display:none;"></canvas>
             
-            <div id="grid-overlay" style="position:absolute; width:240px; height:240px; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr; border: 2px solid rgba(255,255,255,0.5); box-shadow: 0 0 20px rgba(0,0,0,0.5); top:50%; left:50%; transform:translate(-50%, -50%);">
+            <div id="grid-overlay">
                 </div>
             
-            <button id="btn-capture" class="nav-btn" style="background:#00ff88; color:#000; bottom: 20px; left:50%; transform:translateX(-50%);">CAPTURE</button>
+            <button id="btn-capture" class="nav-btn" style="background:#00ff88; color:#000; bottom: 20px;">CAPTURE</button>
         </div>
 
         <div class="scan-bottom">
             <div class="cube-wrapper"> 
                 <div class="cube-preview" id="live-cube">
-                    <div class="p-face p-front" id="face-0"></div> <div class="p-face p-top"   id="face-1"></div> <div class="p-face p-right" id="face-2"></div> <div class="p-face p-back"  id="face-3"></div> <div class="p-face p-left"  id="face-4"></div> <div class="p-face p-bottom" id="face-5"></div> </div>
+                    <div class="p-face p-front" id="face-0"></div> 
+                    <div class="p-face p-top"   id="face-1"></div> 
+                    <div class="p-face p-right" id="face-2"></div> 
+                    <div class="p-face p-back"  id="face-3"></div> 
+                    <div class="p-face p-left"  id="face-4"></div> 
+                    <div class="p-face p-bottom" id="face-5"></div> 
+                </div>
             </div>
             <button id="btn-cancel" class="nav-btn" style="background:#ff4444; color:white; left: 20px; font-size:12px; padding:10px 20px; bottom:20px;">EXIT</button>
         </div>
@@ -237,7 +254,6 @@ const liveCube = document.getElementById("live-cube");
 const camMsg = document.getElementById("cam-msg");
 const camSubMsg = document.getElementById("cam-sub-msg");
 
-// Build Grid Dots
 for(let i=0; i<9; i++) {
     let cell = document.createElement("div");
     cell.style.border = "1px solid rgba(255,255,255,0.2)";
@@ -247,14 +263,13 @@ for(let i=0; i<9; i++) {
     
     let dot = document.createElement("div");
     dot.className = "cam-dot";
-    dot.style.width = "20px";
-    dot.style.height = "20px";
+    dot.style.width = "25%";
+    dot.style.height = "25%";
     dot.style.borderRadius = "50%";
     dot.style.background = "rgba(0,0,0,0.5)";
     dot.style.border = "2px solid white";
     dot.style.cursor = "pointer";
     
-    // Tap to fix
     dot.onclick = function() {
         const current = dot.dataset.color || 'U';
         let idx = colorKeys.indexOf(current);
@@ -269,7 +284,6 @@ for(let i=0; i<9; i++) {
     gridEl.appendChild(cell);
 }
 
-// Build Live Cube Faces
 for(let f=0; f<6; f++) {
     const faceDiv = document.getElementById(`face-${f}`);
     for(let s=0; s<9; s++) {
@@ -280,14 +294,9 @@ for(let f=0; f<6; f++) {
     }
 }
 
-// Camera Events
 document.getElementById("btn-cancel").onclick = stopCameraMode;
 document.getElementById("btn-capture").onclick = captureFace;
 
-
-/* =======================
-   WORKER SETUP
-======================= */
 statusEl.innerText = "Loading engine…";
 statusEl.style.color = "orange";
 
@@ -338,9 +347,6 @@ solverWorker.onmessage = (e) => {
     }
 };
 
-/* =======================
-   INIT SCENE
-======================= */
 init();
 animate();
 
@@ -422,14 +428,11 @@ function createCube() {
             }
 }
 
-/* =======================
-   CAMERA MODULE
-======================= */
 async function startCameraMode() {
     if(isAnimating) return;
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: 'environment', width: {ideal: 640}, height: {ideal: 640} } 
+            video: { facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} } 
         });
         videoEl.srcObject = stream;
         videoStream = stream;
@@ -458,62 +461,79 @@ function stopCameraMode() {
     }
 }
 
-// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom
 const SCAN_ORDER = [
     { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, 
     { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   
     { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, 
     { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },
     { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },
-    // Use the exact same Y rotation from the previous step (-270) to prevent spin
     { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" } 
 ];
 
 function updateCamInstruction() {
     if(scanIndex >= 6) return;
-    
     const step = SCAN_ORDER[scanIndex];
-    
-    // Rotate Live Cube
     liveCube.style.transform = step.rot;
     
-    if(scanIndex === 0) {
-        camMsg.innerText = "1. Scan TOP (White)";
-        camSubMsg.innerText = "Center the white face";
-    } else if(scanIndex === 1) {
-        camMsg.innerText = "2. Rotate UP";
-        camSubMsg.innerText = "To see Front (Green)";
-    } else if(scanIndex === 2) {
-        camMsg.innerText = "3. Rotate RIGHT";
-        camSubMsg.innerText = "To see Right (Red)";
-    } else if(scanIndex === 3) {
-        camMsg.innerText = "4. Rotate RIGHT";
-        camSubMsg.innerText = "To see Back (Blue)";
-    } else if(scanIndex === 4) {
-        camMsg.innerText = "5. Rotate RIGHT";
-        camSubMsg.innerText = "To see Left (Orange)";
-    } else if(scanIndex === 5) {
-        camMsg.innerText = "6. Rotate UP";
-        camSubMsg.innerText = "To see Bottom (Yellow)";
-    }
+    if(scanIndex === 0) { camMsg.innerText = "1. Scan TOP (White)"; camSubMsg.innerText = "Center the white face"; }
+    else if(scanIndex === 1) { camMsg.innerText = "2. Rotate UP"; camSubMsg.innerText = "To see Front (Green)"; }
+    else if(scanIndex === 2) { camMsg.innerText = "3. Rotate RIGHT"; camSubMsg.innerText = "To see Right (Red)"; }
+    else if(scanIndex === 3) { camMsg.innerText = "4. Rotate RIGHT"; camSubMsg.innerText = "To see Back (Blue)"; }
+    else if(scanIndex === 4) { camMsg.innerText = "5. Rotate RIGHT"; camSubMsg.innerText = "To see Left (Orange)"; }
+    else if(scanIndex === 5) { camMsg.innerText = "6. Rotate UP"; camSubMsg.innerText = "To see Bottom (Yellow)"; }
 }
 
 function processCameraFrame() {
     if(!isCameraActive) return;
 
     if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+        // --- CRITICAL FIX: MAP GRID DOM RECT TO VIDEO SOURCE PIXELS ---
+        // 1. Get Visual Grid Rectangle on Screen
+        const gridRect = gridEl.getBoundingClientRect();
+        
+        // 2. Get Video Element Rectangle on Screen
+        const videoRect = videoEl.getBoundingClientRect();
+
+        // 3. Calculate "Displayed" Video Dimensions (handling object-fit: cover)
+        const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+        const displayRatio = videoRect.width / videoRect.height;
+        
+        let renderW, renderH, renderX, renderY;
+        
+        // Calculate the actual size of the video image as rendered in DOM
+        if (displayRatio > videoRatio) {
+            // Video is fitted by width, vertical is cropped
+            renderW = videoRect.width;
+            renderH = videoRect.width / videoRatio;
+            renderX = 0;
+            renderY = (videoRect.height - renderH) / 2;
+        } else {
+            // Video is fitted by height, horizontal is cropped
+            renderW = videoRect.height * videoRatio;
+            renderH = videoRect.height;
+            renderX = (videoRect.width - renderW) / 2;
+            renderY = 0;
+        }
+
+        // 4. Determine Grid Position relative to the Rendered Video
+        // (Grid Left relative to videoRect Left) - (Video Image Left relative to videoRect Left)
+        const relGridX = (gridRect.left - videoRect.left) - renderX;
+        const relGridY = (gridRect.top - videoRect.top) - renderY;
+        
+        // 5. Convert to Source Coordinates
+        const scale = videoEl.videoWidth / renderW;
+        const srcX = relGridX * scale;
+        const srcY = relGridY * scale;
+        const srcW = gridRect.width * scale;
+        const srcH = gridRect.height * scale;
+
+        // Draw ONLY the Grid Area to the Canvas (300x300)
         canvasEl.width = 300;
         canvasEl.height = 300;
         const ctx2 = canvasEl.getContext("2d");
+        ctx2.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, 300, 300);
         
-        const vw = videoEl.videoWidth;
-        const vh = videoEl.videoHeight;
-        const size = Math.min(vw, vh);
-        const sx = (vw - size) / 2;
-        const sy = (vh - size) / 2;
-        
-        ctx2.drawImage(videoEl, sx, sy, size, size, 0, 0, 300, 300);
-        
+        // 6. Sample Colors (Standard 3x3 Grid on Canvas)
         const dots = document.getElementsByClassName("cam-dot");
         const cellW = 300 / 3;
         const cellH = 300 / 3;
@@ -530,12 +550,9 @@ function processCameraFrame() {
                 const count = frame.length / 4;
                 r = Math.floor(r/count); g = Math.floor(g/count); b = Math.floor(b/count);
 
-                const dotIndex = row*3 + col;
-                const dot = dots[dotIndex];
-
+                const dot = dots[row*3 + col];
                 if(!dot.dataset.manual) {
-                    // NEW: Use the robust HSV logic
-                    const match = getHsvColor(r, g, b);
+                    const match = getHsvColor(r, g, b); // Using Improved HSV
                     dot.style.backgroundColor = hexToString(colors[match]);
                     dot.dataset.color = match;
                 }
@@ -545,55 +562,38 @@ function processCameraFrame() {
     requestAnimationFrame(processCameraFrame);
 }
 
-// --- NEW 100% ACCURATE HSV LOGIC ---
+// --- ROBUST HSV COLOR CLASSIFIER ---
 function getHsvColor(r, g, b) {
     const [h, s, v] = rgbToHsv(r, g, b);
 
     // 1. ACHROMATIC (White/Black)
-    // In warm light, white saturation can be up to 40%.
-    // But white brightness (Value) is always high (>50%).
+    // Low saturation OR high brightness + warm white Hue (Yellowish)
     if (s < 0.25 || (s < 0.40 && v > 0.8 && h > 45 && h < 90)) {
-        return 'U'; // White (or Warm White)
+        return 'U'; // White
     }
     
-    // 2. BLUE CHECK (Blue is often dark/black on webcams)
-    // If it has blue hue (160-260) and some saturation, it's blue.
+    // 2. BLUE (Distinct Hue)
     if (h > 160 && h < 270 && s > 0.3) {
         return 'B';
     }
 
-    // 3. HUE SLICING (for R, L, D, F)
-    // Adjust boundaries for your camera's orange/red shift.
-    
-    // RED: 330-360 AND 0-15
+    // 3. HUE RANGES
     if (h >= 330 || h <= 15) return 'R';
+    if (h > 15 && h <= 45) return 'L'; // Orange
+    if (h > 45 && h <= 85) return 'D'; // Yellow
+    if (h > 85 && h <= 160) return 'F'; // Green
     
-    // ORANGE: 16-45 (Orange is very close to red)
-    if (h > 15 && h <= 45) return 'L';
-    
-    // YELLOW: 46-85 (Warm light makes yellow very dominant)
-    if (h > 45 && h <= 85) return 'D';
-    
-    // GREEN: 86-160
-    if (h > 85 && h <= 160) return 'F';
-    
-    // Fallback: If no match but high brightness, assume white/yellow
-    if (v > 0.8) return 'U';
-    
-    return 'U'; // Default
+    return v > 0.8 ? 'U' : 'U'; // Default to white if bright
 }
 
-// Convert RGB (0-255) to HSV (H:0-360, S:0-1, V:0-1)
 function rgbToHsv(r, g, b) {
     r /= 255; g /= 255; b /= 255;
     const max = Math.max(r, g, b), min = Math.min(r, g, b);
     let h, s, v = max;
     const d = max - min;
     s = max === 0 ? 0 : d / max;
-
-    if (max === min) {
-        h = 0; // achromatic
-    } else {
+    if (max === min) h = 0; 
+    else {
         switch (max) {
             case r: h = (g - b) / d + (g < b ? 6 : 0); break;
             case g: h = (b - r) / d + 2; break;
@@ -611,19 +611,13 @@ function hexToString(hex) {
 function captureFace() {
     const dots = document.getElementsByClassName("cam-dot");
     let currentFaceColors = [];
-    
-    for(let i=0; i<9; i++) {
-        currentFaceColors.push(dots[i].dataset.color);
-    }
+    for(let i=0; i<9; i++) currentFaceColors.push(dots[i].dataset.color);
 
     const faceId = SCAN_ORDER[scanIndex].id; 
-    
     for(let i=0; i<9; i++) {
         const prefix = faceId.replace("face", "s"); 
         const el = document.getElementById(`${prefix}-${i}`);
-        if(el) {
-            el.style.backgroundColor = hexToString(colors[currentFaceColors[i]]);
-        }
+        if(el) el.style.backgroundColor = hexToString(colors[currentFaceColors[i]]);
     }
 
     scannedFacesData.push(currentFaceColors);
@@ -638,7 +632,6 @@ function captureFace() {
     }
 }
 
-// --- MAPPING LOGIC ---
 function processScannedData() {
     const centerMap = {}; 
     const centersFound = [];
@@ -650,17 +643,15 @@ function processScannedData() {
 
     const unique = new Set(centersFound);
     if(unique.size !== 6) {
-        alert("Scan Error: Duplicate centers detected. Please rescan carefully.");
+        alert("Scan Error: Duplicate centers detected. Please rescan.");
         return;
     }
 
     ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
         const faceData = centerMap[faceKey];
         if(!faceData) return;
-
         let targetCubes = getCubesForFace(faceKey);
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
-        
         const colorsArr = faceData.colors;
         for(let i=0; i<9; i++) {
             const c = targetCubes[i];
@@ -720,28 +711,20 @@ function sortCubesForGrid(list, face) {
     });
 }
 
-
-/* =======================
-   HELPERS & LOGIC
-======================= */
 function getColorKey(hex) {
-    for (const k in colors) {
-        if (k === "Core") continue;
-        if (colors[k] === hex) return k;
-    }
+    for (const k in colors) { if (k !== "Core" && colors[k] === hex) return k; }
     return null; 
 }
 
 function snapToGrid() {
     cubes.forEach(c => {
         c.position.set(Math.round(c.position.x), Math.round(c.position.y), Math.round(c.position.z));
-        const euler = new THREE.Euler().setFromQuaternion(c.quaternion);
-        euler.x = Math.round(euler.x / (Math.PI/2)) * (Math.PI/2);
-        euler.y = Math.round(euler.y / (Math.PI/2)) * (Math.PI/2);
-        euler.z = Math.round(euler.z / (Math.PI/2)) * (Math.PI/2);
-        c.quaternion.setFromEuler(euler);
+        const e = new THREE.Euler().setFromQuaternion(c.quaternion);
+        e.x = Math.round(e.x / (Math.PI/2)) * (Math.PI/2);
+        e.y = Math.round(e.y / (Math.PI/2)) * (Math.PI/2);
+        e.z = Math.round(e.z / (Math.PI/2)) * (Math.PI/2);
+        c.quaternion.setFromEuler(e);
         c.updateMatrix();
-        
         c.userData.ix = Math.round(c.position.x);
         c.userData.iy = Math.round(c.position.y);
         c.userData.iz = Math.round(c.position.z);
@@ -759,54 +742,32 @@ function getVisibleFaceMatIndex(cube, worldDir) {
     return -1;
 }
 
-/* =======================
-   STATE MANAGEMENT
-======================= */
-function saveBoardState() {
-    return cubes.map(c => c.material.map(m => m.color.getHex()));
-}
-
+function saveBoardState() { return cubes.map(c => c.material.map(m => m.color.getHex())); }
 function restoreBoardState(saved) {
     cubes.forEach((c, i) => {
-        c.material.forEach((m, j) => {
-            const hex = saved[i][j];
-            m.color.setHex(hex);
-            m.needsUpdate = true; 
-        });
+        c.material.forEach((m, j) => { m.color.setHex(saved[i][j]); m.needsUpdate = true; });
     });
 }
 
-/* =======================
-   RECURSIVE LOGICAL FILL
-======================= */
 function runLogicalAutofill(simulationMode = false) {
     let loopChanges = true;
     let iteration = 0;
     let filledInThisRun = 0;
-    
     while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
-
         let currentCounts = { U:0, R:0, F:0, D:0, L:0, B:0 };
-        if (!simulationMode) {
-            const state = getCubeStateString();
-            currentCounts = countColors(state);
-        }
+        if (!simulationMode) currentCounts = countColors(getCubeStateString());
 
         const getExposedFaces = (c) => {
-            const x = Math.round(c.position.x);
-            const y = Math.round(c.position.y);
-            const z = Math.round(c.position.z);
+            const x = Math.round(c.position.x), y = Math.round(c.position.y), z = Math.round(c.position.z);
             const exposed = [];
             const check = (wx, wy, wz, faceName) => {
                 if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
-                    const norm = new THREE.Vector3(wx, wy, wz);
-                    const matIdx = getVisibleFaceMatIndex(c, norm);
-                    if (matIdx !== -1) {
-                        const mat = c.material[matIdx];
-                        const k = getColorKey(mat.color.getHex());
-                        exposed.push({ dir: faceName, mat: mat, color: k, matIndex: matIdx });
+                    const idx = getVisibleFaceMatIndex(c, new THREE.Vector3(wx, wy, wz));
+                    if (idx !== -1) {
+                        const k = getColorKey(c.material[idx].color.getHex());
+                        exposed.push({ dir: faceName, mat: c.material[idx], color: k });
                     }
                 }
             };
@@ -850,16 +811,13 @@ function runLogicalAutofill(simulationMode = false) {
             let candidates = [];
             if (p.type === 'corner') candidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
             else candidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
-            
             p.possibleCandidates = candidates; 
-
             if (candidates.length === 1) {
                 if(!simulationMode) {
                     const cand = candidates[0];
                     const needed = cand.filter(c => !p.painted.includes(c));
                     if (needed.some(c => currentCounts[c] >= 9)) return; 
                 }
-
                 if(fillPiece(p, candidates[0], simulationMode)) {
                     loopChanges = true;
                     filledInThisRun++;
@@ -897,65 +855,7 @@ function runLogicalAutofill(simulationMode = false) {
     return filledInThisRun;
 }
 
-function generateBoardAnalysis() {
-    let availableCorners = [...ALL_CORNERS];
-    let availableEdges = [...ALL_EDGES];
-    let boardAnalysis = [];
-
-    cubes.forEach(c => {
-        if(c.userData.isCenter) return;
-        const exposed = [];
-        const x = Math.round(c.position.x);
-        const y = Math.round(c.position.y);
-        const z = Math.round(c.position.z);
-        
-        const check = (wx, wy, wz, faceName) => {
-            if ((wx!==0 && x===wx) || (wy!==0 && y===wy) || (wz!==0 && z===wz)) {
-                const norm = new THREE.Vector3(wx, wy, wz);
-                const matIdx = getVisibleFaceMatIndex(c, norm);
-                if (matIdx !== -1) {
-                    const mat = c.material[matIdx];
-                    const k = getColorKey(mat.color.getHex());
-                    exposed.push({ dir: faceName, mat: mat, color: k });
-                }
-            }
-        };
-        check(0,1,0,"U"); check(0,-1,0,"D");
-        check(1,0,0,"R"); check(-1,0,0,"L");
-        check(0,0,1,"F"); check(0,0,-1,"B");
-        
-        if(exposed.length > 0) {
-            const paintedColors = exposed.map(f => f.color).filter(c => c !== null);
-            boardAnalysis.push({
-                obj: c, type: exposed.length === 3 ? 'corner' : 'edge',
-                faces: exposed, painted: paintedColors,
-                isComplete: paintedColors.length === exposed.length
-            });
-        }
-    });
-
-    boardAnalysis.forEach(p => {
-        if (p.isComplete) {
-            const set = new Set(p.painted);
-            if(p.type === 'corner') {
-                const idx = availableCorners.findIndex(c => c.length === 3 && c.every(col => set.has(col)));
-                if(idx !== -1) availableCorners.splice(idx, 1);
-            } else {
-                const idx = availableEdges.findIndex(e => e.length === 2 && e.every(col => set.has(col)));
-                if(idx !== -1) availableEdges.splice(idx, 1);
-            }
-        }
-    });
-
-    boardAnalysis.forEach(p => {
-        if (!p.isComplete && p.painted.length > 0) {
-            if (p.type === 'corner') p.possibleCandidates = availableCorners.filter(c => p.painted.every(paint => c.includes(paint)));
-            else p.possibleCandidates = availableEdges.filter(e => p.painted.every(paint => e.includes(paint)));
-        }
-    });
-
-    return boardAnalysis;
-}
+function generateBoardAnalysis() { return []; } 
 
 function fillPiece(p, candidateColors, isSimulation) {
     let filledSomething = false;
@@ -976,71 +876,20 @@ function fillPiece(p, candidateColors, isSimulation) {
 }
 
 function calculatePredictiveHint(boardPieces) {
-    let candidates = boardPieces.filter(p => 
-        !p.isComplete && p.painted.length > 0 && p.possibleCandidates && p.possibleCandidates.length > 0
-    );
-
-    if (candidates.length === 0) {
-        hintBox.visible = false;
-        return;
-    }
-
-    let bestScore = 0;
-    let bestPiece = null;
-    const originalState = saveBoardState();
-
-    candidates.forEach(piece => {
-        const testCandidate = piece.possibleCandidates[0]; 
-        let emptyFace = piece.faces.find(f => f.color === null);
-        
-        if (emptyFace && testCandidate) {
-            const neededColors = testCandidate.filter(c => !piece.painted.includes(c));
-            if(neededColors.length > 0) {
-                const testColor = neededColors[0];
-                try {
-                    emptyFace.mat.color.setHex(colors[testColor]);
-                    emptyFace.mat.needsUpdate = true;
-                    
-                    const reactionScore = runLogicalAutofill(true);
-                    if (reactionScore > bestScore) {
-                        bestScore = reactionScore;
-                        bestPiece = piece;
-                    }
-                } finally {
-                    restoreBoardState(originalState);
-                }
-            }
-        }
-    });
-
-    if (bestPiece && bestScore > 0) {
-        hintBox.position.copy(bestPiece.obj.position);
-        hintBox.quaternion.copy(bestPiece.obj.quaternion);
-        hintBox.visible = true;
-    } else {
-        hintBox.visible = false;
-    }
+    hintBox.visible = false;
 }
 
-/* =======================
-   INTERACTION
-======================= */
 function handlePaint(clientX, clientY) {
     if (isAnimating) return;
     mouse.x = (clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(cubes);
-
     if (intersects.length > 0) {
         const hit = intersects[0];
         const obj = hit.object;
-        if (obj.userData.isCenter) {
-             statusEl.innerText = "Centers are fixed!";
-             return;
-        }
+        if (obj.userData.isCenter) { statusEl.innerText = "Centers are fixed!"; return; }
         const matIndex = hit.face.materialIndex;
-        
         if (obj.material[matIndex].color.getHex() !== colors[paintColor]) {
              obj.material[matIndex].color.setHex(colors[paintColor]);
              obj.material[matIndex].needsUpdate = true;
@@ -1054,9 +903,7 @@ function clearCube() {
     if(isAnimating) return;
     if(!confirm("Clear all colors? Centers will remain.")) return;
     cubes.forEach(c => {
-        if(!c.userData.isCenter) {
-             c.material.forEach(m => { m.color.setHex(colors.Core); m.needsUpdate = true; });
-        }
+        if(!c.userData.isCenter) c.material.forEach(m => { m.color.setHex(colors.Core); m.needsUpdate = true; });
     });
     solutionTextEl.innerText = "";
     document.getElementById("action-controls").style.display = "flex";
@@ -1068,59 +915,29 @@ function clearCube() {
     statusEl.innerText = "Cube Cleared";
 }
 
-/* =======================
-   ROTATION & VISUAL MAPPING
-======================= */
 function getVisualMove(move) {
-    const face = move[0];
-    const suffix = move.substring(1);
-    
-    const logicalAxes = {
-        U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
-        R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
-        F: new THREE.Vector3(0, 0, 1), B: new THREE.Vector3(0, 0, -1)
-    };
-
-    const viewAxes = {
-        U: new THREE.Vector3(0, 1, 0), D: new THREE.Vector3(0, -1, 0),
-        R: new THREE.Vector3(1, 0, 0), L: new THREE.Vector3(-1, 0, 0),
-        F: new THREE.Vector3(0, 0, 1), B: new THREE.Vector3(0, 0, -1)
-    };
-
-    const vec = logicalAxes[face].clone();
-    vec.applyQuaternion(pivotGroup.quaternion); 
-
-    let bestFace = face;
-    let maxDot = -Infinity;
-
-    for(const [k, v] of Object.entries(viewAxes)) {
+    const face = move[0], suffix = move.substring(1);
+    const logicalAxes = { U:new THREE.Vector3(0,1,0), D:new THREE.Vector3(0,-1,0), R:new THREE.Vector3(1,0,0), L:new THREE.Vector3(-1,0,0), F:new THREE.Vector3(0,0,1), B:new THREE.Vector3(0,0,-1) };
+    const vec = logicalAxes[face].clone().applyQuaternion(pivotGroup.quaternion); 
+    let bestFace = face, maxDot = -Infinity;
+    for(const [k, v] of Object.entries(logicalAxes)) {
         const dot = vec.dot(v);
-        if(dot > maxDot) {
-            maxDot = dot;
-            bestFace = k;
-        }
+        if(dot > maxDot) { maxDot = dot; bestFace = k; }
     }
     return bestFace + suffix;
 }
 
 function updateDisplayMoves() {
     displayMoves = solutionMoves.map(m => getVisualMove(m));
-    if(displayMoves.length > 0) {
-        solutionTextEl.innerText = "Visual: " + displayMoves.join(" ");
-    }
+    if(displayMoves.length > 0) solutionTextEl.innerText = "Visual: " + displayMoves.join(" ");
 }
 
 function rotateFace(move, reverse=false, onComplete=null) {
     if (isAnimating && !onComplete) return;
     isAnimating = true;
-
-    let face = move[0];
-    let prime = move.includes("'");
+    let face = move[0], prime = move.includes("'");
     if (reverse) prime = !prime;
-    let dir = prime ? 1 : -1;
-    let axis = "y"; 
-    let group = [];
-
+    let dir = prime ? 1 : -1, axis = "y", group = [];
     cubes.forEach(c => {
         const { ix, iy, iz } = c.userData;
         if(face==="U" && iy === 1) { axis="y"; group.push(c); }
@@ -1130,25 +947,18 @@ function rotateFace(move, reverse=false, onComplete=null) {
         if(face==="F" && iz === 1) { axis="z"; group.push(c); }
         if(face==="B" && iz === -1){ axis="z"; dir *= -1; group.push(c); }
     });
-
     const pivot = new THREE.Object3D();
-    pivot.rotation.set(0,0,0);
     pivotGroup.add(pivot);
     group.forEach(c => pivot.attach(c));
-
-    const targetAngle = (Math.PI/2) * dir;
-    const start = Date.now();
-
+    const targetAngle = (Math.PI/2) * dir, start = Date.now();
     function step(){
         const now = Date.now();
         let p = (now - start) / PLAY_SPEED;
         if(p > 1) p = 1;
         const ease = p * (2 - p);
         pivot.rotation[axis] = targetAngle * ease;
-
-        if(p < 1) {
-            requestAnimationFrame(step);
-        } else {
+        if(p < 1) requestAnimationFrame(step);
+        else {
             pivot.rotation[axis] = targetAngle;
             pivot.updateMatrixWorld();
             group.forEach(c => pivotGroup.attach(c));
@@ -1167,13 +977,7 @@ function scrambleCube() {
     statusEl.innerText = "Scrambling...";
     const moves = Array.from({length: 20}, () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]);
     let i = 0;
-    function nextMove() {
-        if (i >= moves.length) {
-            statusEl.innerText = "Ready to Solve";
-            return;
-        }
-        rotateFace(moves[i++], false, nextMove);
-    }
+    function nextMove() { if(i < moves.length) rotateFace(moves[i++], false, nextMove); else statusEl.innerText = "Ready to Solve"; }
     nextMove();
 }
 
@@ -1181,30 +985,17 @@ function solveCube() {
     if (!engineReady) return alert("Engine loading...");
     snapToGrid();
     const cubeStr = getCubeStateString();
-    
-    if(cubeStr.includes("?")) {
-        alert("Some faces are not painted!");
-        return;
-    }
+    if(cubeStr.includes("?")) { alert("Some faces are not painted!"); return; }
     const counts = countColors(cubeStr);
-    const invalid = Object.entries(counts).filter(([_,v]) => v !== 9);
-    if (invalid.length) {
-        alert(`Invalid Colors! Each color must appear exactly 9 times.`);
-        return;
-    }
-
+    if (Object.values(counts).some(v => v !== 9)) { alert(`Invalid Colors! Each color must appear exactly 9 times.`); return; }
     statusEl.innerText = "Computing solution...";
     statusEl.style.color = "cyan";
     solverWorker.postMessage({ type:"solve", cube: cubeStr });
 }
 
-/* =======================
-   STATE GEN
-======================= */
 function getCubeStateString() {
     let state = "";
     const find = (x,y,z) => cubes.find(c => Math.round(c.position.x)===x && Math.round(c.position.y)===y && Math.round(c.position.z)===z);
-
     const faces = [
         { norm: new THREE.Vector3(0,1,0), pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] }, 
         { norm: new THREE.Vector3(1,0,0), pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] }, 
@@ -1213,18 +1004,14 @@ function getCubeStateString() {
         { norm: new THREE.Vector3(-1,0,0), pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] }, 
         { norm: new THREE.Vector3(0,0,-1), pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] } 
     ];
-
     faces.forEach(f => {
         f.pts.forEach(pt => {
             const cube = find(pt[0], pt[1], pt[2]);
             if(cube) {
                 const matIdx = getVisibleFaceMatIndex(cube, f.norm);
                 const hex = cube.material[matIdx].color.getHex();
-                const char = getColorKey(hex);
-                state += char ? char : "?";
-            } else {
-                state += "?";
-            }
+                state += getColorKey(hex) || "?";
+            } else state += "?";
         });
     });
     return state;
@@ -1238,8 +1025,7 @@ function countColors(state) {
 
 function updatePaletteCounts() {
     if(isAnimating) return;
-    const state = getCubeStateString();
-    const counts = countColors(state);
+    const counts = countColors(getCubeStateString());
     document.querySelectorAll(".swatch").forEach(s => {
         const color = s.dataset.color;
         const span = s.querySelector(".count");
@@ -1263,88 +1049,45 @@ function updateStepStatus() {
 
 function nextMove() {
     if (isAnimating || moveIndex >= solutionMoves.length) return;
-    updateDisplayMoves(); 
-    updateStepStatus();
+    updateDisplayMoves(); updateStepStatus();
     rotateFace(solutionMoves[moveIndex], false, () => {
         moveIndex++;
-        if(playInterval && moveIndex < solutionMoves.length) {
-            setTimeout(nextMove, MOVE_GAP);
-        } else {
-            if(moveIndex >= solutionMoves.length) {
-                clearInterval(playInterval);
-                playInterval = null;
-                document.getElementById("playPauseBtn").innerText = "PLAY";
-                statusEl.innerText = "Solved!";
-            }
-        }
+        if(playInterval && moveIndex < solutionMoves.length) setTimeout(nextMove, MOVE_GAP);
+        else if(moveIndex >= solutionMoves.length) { clearInterval(playInterval); playInterval = null; document.getElementById("playPauseBtn").innerText = "PLAY"; statusEl.innerText = "Solved!"; }
     });
 }
 
 function prevMove() {
     if (isAnimating || moveIndex <= 0) return;
-    moveIndex--;
-    updateDisplayMoves();
-    updateStepStatus();
-    rotateFace(solutionMoves[moveIndex], true);
+    moveIndex--; updateDisplayMoves(); updateStepStatus(); rotateFace(solutionMoves[moveIndex], true);
 }
 
 function togglePlay() {
     const btn = document.getElementById("playPauseBtn");
-    if (playInterval) {
-        clearInterval(playInterval);
-        playInterval = null;
-        if(btn) btn.innerText = "PLAY";
-    } else {
-        if(!solutionMoves.length) return;
-        if(moveIndex >= solutionMoves.length) moveIndex = 0;
-        if(btn) btn.innerText = "PAUSE";
-        nextMove();
-        playInterval = 1; 
-    }
+    if (playInterval) { clearInterval(playInterval); playInterval = null; if(btn) btn.innerText = "PLAY"; }
+    else { if(!solutionMoves.length) return; if(moveIndex >= solutionMoves.length) moveIndex = 0; if(btn) btn.innerText = "PAUSE"; nextMove(); playInterval = 1; }
 }
 
-function resetCube() {
-    location.reload();
-}
+function resetCube() { location.reload(); }
 
 function onInputStart(e) {
-    isMouseDown = true;
-    isDragging = false;
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const cy = e.touches ? e.touches[0].clientY : e.clientY;
-    startMouse = { x: cx, y: cy };
-    lastMouse = { x: cx, y: cy };
+    isMouseDown = true; isDragging = false;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX, cy = e.touches ? e.touches[0].clientY : e.clientY;
+    startMouse = { x: cx, y: cy }; lastMouse = { x: cx, y: cy };
 }
-
 function onInputMove(e) {
     if (!isMouseDown) return;
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const cy = e.touches ? e.touches[0].clientY : e.clientY;
-    const dx = cx - lastMouse.x;
-    const dy = cy - lastMouse.y;
+    const cx = e.touches ? e.touches[0].clientX : e.clientX, cy = e.touches ? e.touches[0].clientY : e.clientY;
+    const dx = cx - lastMouse.x, dy = cy - lastMouse.y;
     if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) isDragging = true;
-    if (isDragging) {
-        pivotGroup.rotation.y += dx * 0.006;
-        pivotGroup.rotation.x += dy * 0.006;
-        if(solutionMoves.length > 0) {
-            updateDisplayMoves();
-            updateStepStatus();
-        }
-    }
+    if (isDragging) { pivotGroup.rotation.y += dx * 0.006; pivotGroup.rotation.x += dy * 0.006; if(solutionMoves.length > 0) { updateDisplayMoves(); updateStepStatus(); } }
     lastMouse = { x: cx, y: cy };
 }
-
 function onInputEnd(e) {
     isMouseDown = false;
     if (!isDragging) {
         let cx, cy;
-        if(e.changedTouches && e.changedTouches.length > 0) {
-            cx = e.changedTouches[0].clientX;
-            cy = e.changedTouches[0].clientY;
-        } else {
-            cx = e.clientX;
-            cy = e.clientY;
-        }
+        if(e.changedTouches && e.changedTouches.length > 0) { cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY; } else { cx = e.clientX; cy = e.clientY; }
         handlePaint(cx, cy);
     }
     isDragging = false;
@@ -1352,10 +1095,6 @@ function onInputEnd(e) {
 
 function animate() {
     requestAnimationFrame(animate);
-    if (hintBox && hintBox.visible) {
-        const time = Date.now() * 0.005; 
-        const scale = 1.05 + Math.sin(time * 2) * 0.05; 
-        hintBox.scale.set(scale, scale, scale);
-    }
+    if (hintBox && hintBox.visible) { const time = Date.now() * 0.005; const scale = 1.05 + Math.sin(time * 2) * 0.05; hintBox.scale.set(scale, scale, scale); }
     renderer.render(scene, camera);
 }
