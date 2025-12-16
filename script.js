@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – STRICT PREDICTIVE HINT SYSTEM
+   RUBIK'S CUBE SOLVER – ROBUST & SAFE (NO COLOR LEAKS)
    ========================================================= */
 
 /* =======================
@@ -262,7 +262,9 @@ function saveBoardState() {
 function restoreBoardState(saved) {
     cubes.forEach((c, i) => {
         c.material.forEach((m, j) => {
-            m.color.setHex(saved[i][j]);
+            const hex = saved[i][j];
+            m.color.setHex(hex);
+            m.needsUpdate = true; // Force update
         });
     });
 }
@@ -275,12 +277,18 @@ function runLogicalAutofill(simulationMode = false) {
     let iteration = 0;
     let filledInThisRun = 0;
     
-    let boardAnalysis = []; 
-
+    // Safety Break
     while (loopChanges && iteration < 20) {
         loopChanges = false;
         iteration++;
-        boardAnalysis = []; 
+
+        // 0. Global Count Check (Constraint)
+        // If real mode, check if we have too many of any color
+        let currentCounts = { U:0, R:0, F:0, D:0, L:0, B:0 };
+        if (!simulationMode) {
+            const state = getCubeStateString();
+            currentCounts = countColors(state);
+        }
 
         const getExposedFaces = (c) => {
             const x = Math.round(c.position.x);
@@ -304,6 +312,8 @@ function runLogicalAutofill(simulationMode = false) {
             return exposed;
         };
 
+        // 1. Analyze Board
+        let boardAnalysis = []; 
         cubes.forEach(c => {
             if(c.userData.isCenter) return;
             const faces = getExposedFaces(c);
@@ -316,6 +326,7 @@ function runLogicalAutofill(simulationMode = false) {
             });
         });
 
+        // 2. Inventory Management
         let availableCorners = [...ALL_CORNERS];
         let availableEdges = [...ALL_EDGES];
 
@@ -332,6 +343,7 @@ function runLogicalAutofill(simulationMode = false) {
             }
         });
 
+        // 3. Logic A: Forward Deduction (Safe)
         boardAnalysis.forEach(p => {
             if (p.isComplete || p.painted.length === 0) return; 
             let candidates = [];
@@ -341,6 +353,14 @@ function runLogicalAutofill(simulationMode = false) {
             p.possibleCandidates = candidates; 
 
             if (candidates.length === 1) {
+                // Check Max Count Constraint
+                if(!simulationMode) {
+                    const cand = candidates[0];
+                    const needed = cand.filter(c => !p.painted.includes(c));
+                    // If any needed color is already full (9), abort fill to prevent error
+                    if (needed.some(c => currentCounts[c] >= 9)) return;
+                }
+
                 if(fillPiece(p, candidates[0], simulationMode)) {
                     loopChanges = true;
                     filledInThisRun++;
@@ -348,7 +368,8 @@ function runLogicalAutofill(simulationMode = false) {
             }
         });
 
-        if (!loopChanges) {
+        // 4. Logic B: Reverse Deduction (Risky - Disabled in Simulation)
+        if (!loopChanges && !simulationMode) {
             availableCorners.forEach(cand => {
                 const compatiblePieces = boardAnalysis.filter(p => p.type === 'corner' && !p.isComplete && p.painted.every(col => cand.includes(col)));
                 if (compatiblePieces.length === 1) {
@@ -398,10 +419,9 @@ function fillPiece(p, candidateColors, isSimulation) {
 }
 
 /* =======================
-   PREDICTIVE HINT SYSTEM (STRICT MODE)
+   PREDICTIVE HINT SYSTEM (SAFE & STRICT)
 ======================= */
 function calculatePredictiveHint(boardPieces) {
-    // 1. Identify "Testable" pieces
     let candidates = boardPieces.filter(p => 
         !p.isComplete && 
         p.painted.length > 0 && 
@@ -414,7 +434,7 @@ function calculatePredictiveHint(boardPieces) {
         return;
     }
 
-    let bestScore = 0; // Strict threshold: MUST result in >0 fills
+    let bestScore = 0;
     let bestPiece = null;
 
     const originalState = saveBoardState();
@@ -427,21 +447,25 @@ function calculatePredictiveHint(boardPieces) {
             const neededColors = testCandidate.filter(c => !piece.painted.includes(c));
             if(neededColors.length > 0) {
                 const testColor = neededColors[0];
-                emptyFace.mat.color.setHex(colors[testColor]);
                 
-                const reactionScore = runLogicalAutofill(true); // SIMULATE
+                // SAFETY: Try/Finally to ensure restoration
+                try {
+                    emptyFace.mat.color.setHex(colors[testColor]);
+                    emptyFace.mat.needsUpdate = true;
+                    
+                    const reactionScore = runLogicalAutofill(true); // SIMULATE
 
-                if (reactionScore > bestScore) {
-                    bestScore = reactionScore;
-                    bestPiece = piece;
+                    if (reactionScore > bestScore) {
+                        bestScore = reactionScore;
+                        bestPiece = piece;
+                    }
+                } finally {
+                    restoreBoardState(originalState);
                 }
-                
-                restoreBoardState(originalState);
             }
         }
     });
 
-    // Only highlight if we actually found a chain reaction (Score > 0)
     if (bestPiece && bestScore > 0) {
         hintBox.position.copy(bestPiece.obj.position);
         hintBox.quaternion.copy(bestPiece.obj.quaternion);
@@ -475,7 +499,6 @@ function handlePaint(clientX, clientY) {
              obj.material[matIndex].color.setHex(colors[paintColor]);
              obj.material[matIndex].needsUpdate = true;
              
-             // This runs the autofill AND calculates the next hint
              runLogicalAutofill(false); 
         }
     }
