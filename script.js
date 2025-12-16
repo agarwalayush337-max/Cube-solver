@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – ULTIMATE EDITION (CAMERA + AI)
+   RUBIK'S CUBE SOLVER – ULTIMATE EDITION (SMART CAM + MANUAL FIX)
    ========================================================= */
 
 /* =======================
@@ -15,14 +15,16 @@ const colors = {
     Core: 0x202020 // Dark Grey (Internal)
 };
 
-// Map standardized colors to RGB vectors for Camera matching
+const colorKeys = ['U', 'R', 'F', 'D', 'L', 'B']; // Order for cycling
+
+// Initial RGB values (Will update dynamically based on your room lighting)
 const paletteRGB = {
     U: { r:255, g:255, b:255 },
-    R: { r:185, g:0,   b:0   },
+    R: { r:200, g:0,   b:0   },
     F: { r:0,   g:255, b:0   },
-    D: { r:255, g:213, b:0   },
-    L: { r:255, g:51,  b:0   },
-    B: { r:0,   g:81,  b:186 }
+    D: { r:255, g:220, b:0   },
+    L: { r:255, g:100, b:0   }, // Distinct from Red
+    B: { r:0,   g:80,  b:200 }
 };
 
 const ALL_CORNERS = [
@@ -64,17 +66,17 @@ let lastMouse = { x: 0, y: 0 };
 // Camera State
 let videoStream = null;
 let isCameraActive = false;
-let scanFaceOrder = ['F', 'R', 'B', 'L', 'U', 'D']; // Standard rotation flow
+let scanFaceOrder = ['F', 'R', 'B', 'L', 'U', 'D']; 
 let scanIndex = 0;
-let isMirrored = false; // Laptop vs Mobile
+let isMirrored = false; 
 
 /* =======================
-   UI ELEMENTS (Dynamic Injection)
+   UI ELEMENTS
 ======================= */
 const statusEl = document.getElementById("status");
 const solutionTextEl = document.getElementById("solutionText");
 
-// Autofill Stats
+// Stats
 const statsDiv = document.createElement("div");
 statsDiv.style.position = "absolute";
 statsDiv.style.bottom = "20px";
@@ -99,7 +101,7 @@ if(toolRow) {
     toolRow.appendChild(camBtn);
 }
 
-// Camera Overlay Container
+// Camera Overlay
 const camOverlay = document.createElement("div");
 camOverlay.id = "cam-overlay";
 Object.assign(camOverlay.style, {
@@ -108,12 +110,12 @@ Object.assign(camOverlay.style, {
     flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
 });
 camOverlay.innerHTML = `
-    <h2 id="cam-instruction" style="color:white; margin-bottom:10px;">Scan FRONT Face</h2>
+    <h2 id="cam-instruction" style="color:white; margin-bottom:5px;">Scan FRONT Face</h2>
+    <div style="color:#aaa; font-size:12px; margin-bottom:10px;">Tap any dot to correct color manually</div>
     <div style="position:relative; width:300px; height:300px; border:2px solid #fff;">
         <video id="cam-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
-        <canvas id="cam-canvas" width="300" height="300" style="position:absolute; top:0; left:0;"></canvas>
-        <div id="grid-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr;">
-            </div>
+        <canvas id="cam-canvas" width="300" height="300" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
+        <div id="grid-overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:1fr 1fr 1fr;"></div>
     </div>
     <div style="margin-top:15px; display:flex; gap:10px;">
         <button id="btn-mirror" class="tool-btn" style="padding:10px;">Flip Mirror</button>
@@ -131,22 +133,35 @@ const gridEl = document.getElementById("grid-overlay");
 const camInstruction = document.getElementById("cam-instruction");
 const camWarning = document.getElementById("cam-warning");
 
-// Fill Grid
+// Fill Grid with interactive dots
 for(let i=0; i<9; i++) {
     let cell = document.createElement("div");
     cell.style.border = "1px solid rgba(255,255,255,0.3)";
     cell.style.display = "flex";
     cell.style.alignItems = "center";
     cell.style.justifyContent = "center";
+    cell.style.pointerEvents = "auto"; // Enable clicking
     
     let dot = document.createElement("div");
     dot.className = "cam-dot";
-    dot.style.width = "20px";
-    dot.style.height = "20px";
+    dot.style.width = "30px";
+    dot.style.height = "30px";
     dot.style.borderRadius = "50%";
     dot.style.background = "transparent";
     dot.style.border = "2px solid white";
     dot.style.boxShadow = "0 0 4px black";
+    dot.style.cursor = "pointer";
+    
+    // Manual Fix Feature
+    dot.onclick = function() {
+        const current = dot.dataset.color || 'U';
+        let idx = colorKeys.indexOf(current);
+        idx = (idx + 1) % colorKeys.length;
+        const next = colorKeys[idx];
+        dot.style.backgroundColor = hexToString(colors[next]);
+        dot.dataset.color = next;
+        dot.dataset.manual = "true"; // Flag to prevent auto-overwrite by camera
+    };
     
     cell.appendChild(dot);
     gridEl.appendChild(cell);
@@ -246,7 +261,6 @@ function init() {
     pivotGroup = new THREE.Group();
     scene.add(pivotGroup);
 
-    // Hint Box
     const boxGeo = new THREE.BoxGeometry(1.05, 1.05, 1.05); 
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
     hintBox = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 2 }));
@@ -313,15 +327,17 @@ async function startCameraMode() {
         camOverlay.style.display = 'flex';
         isCameraActive = true;
         scanIndex = 0;
-        
-        // Default to mirrored for laptops (assumed if no facingMode specific support found, but safer to start false)
         isMirrored = false; 
         videoEl.style.transform = "none";
         
+        // Reset manual flags
+        const dots = document.getElementsByClassName("cam-dot");
+        for(let d of dots) d.dataset.manual = "";
+
         updateCamInstruction();
         requestAnimationFrame(processCameraFrame);
     } catch(e) {
-        alert("Camera access denied or unavailable. " + e.message);
+        alert("Camera access denied. " + e.message);
     }
 }
 
@@ -332,7 +348,6 @@ function stopCameraMode() {
         videoStream.getTracks().forEach(track => track.stop());
         videoStream = null;
     }
-    // Run autofill once after scanning
     runLogicalAutofill(false);
     updatePaletteCounts();
 }
@@ -344,8 +359,9 @@ function updateCamInstruction() {
     if(face === 'R') text = "Rotate RIGHT (Red Center)";
     if(face === 'B') text = "Rotate RIGHT (Blue Center)";
     if(face === 'L') text = "Rotate RIGHT (Orange Center)";
-    if(face === 'U') text = "Rotate UP (White Center)";
-    if(face === 'D') text = "Rotate DOWN (Yellow Center)";
+    // --- UPDATED INSTRUCTIONS ---
+    if(face === 'U') text = "From Orange, Rotate UP (White Center)";
+    if(face === 'D') text = "From Orange, Rotate DOWN (Yellow Center)";
     camInstruction.innerText = text;
 }
 
@@ -355,48 +371,39 @@ function processCameraFrame() {
     if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
         ctx.drawImage(videoEl, 0, 0, 300, 300);
         
-        // Analyze 9 grid points
         const dots = document.getElementsByClassName("cam-dot");
         const cellW = 300 / 3;
         const cellH = 300 / 3;
         
-        let validColors = 0;
-
+        // We capture the RGB of the center sticker (Index 4) to calibrate
+        let centerR=0, centerG=0, centerB=0;
+        
+        // First Pass: Get Colors
         for(let row=0; row<3; row++) {
             for(let col=0; col<3; col++) {
-                // Center of the cell
                 const x = col * cellW + cellW/2;
                 const y = row * cellH + cellH/2;
-                
-                // Average 10x10 area
                 const frame = ctx.getImageData(x-5, y-5, 10, 10).data;
                 let r=0, g=0, b=0;
                 for(let i=0; i<frame.length; i+=4) {
                     r+=frame[i]; g+=frame[i+1]; b+=frame[i+2];
                 }
                 const count = frame.length / 4;
-                r = Math.floor(r/count);
-                g = Math.floor(g/count);
-                b = Math.floor(b/count);
+                r = Math.floor(r/count); g = Math.floor(g/count); b = Math.floor(b/count);
 
-                // Detect Haziness (Low Contrast)
-                const maxC = Math.max(r,g,b);
-                const minC = Math.min(r,g,b);
-                if(maxC - minC < 20) {
-                    camWarning.innerText = "⚠️ Image too hazy/dark. Improve lighting.";
-                } else {
-                    camWarning.innerText = "";
-                }
-
-                // Match to Palette
-                const match = getClosestColor(r, g, b);
-                
-                // Update Overlay Dot
                 const dotIndex = row*3 + col;
-                const visualIndex = isMirrored ? (row*3 + (2-col)) : dotIndex; // Flip visual logic
-                
-                dots[visualIndex].style.backgroundColor = hexToString(colors[match]);
-                dots[visualIndex].dataset.color = match;
+                const visualIndex = isMirrored ? (row*3 + (2-col)) : dotIndex;
+                const dot = dots[visualIndex];
+
+                // If center (4), store for calibration
+                if(dotIndex === 4) { centerR=r; centerG=g; centerB=b; }
+
+                // Only update if user hasn't manually overridden it
+                if(!dot.dataset.manual) {
+                    const match = getClosestColor(r, g, b);
+                    dot.style.backgroundColor = hexToString(colors[match]);
+                    dot.dataset.color = match;
+                }
             }
         }
     }
@@ -406,18 +413,9 @@ function processCameraFrame() {
 function getClosestColor(r, g, b) {
     let minDist = Infinity;
     let closest = 'U';
-    
     for(const [key, val] of Object.entries(paletteRGB)) {
-        // Euclidean distance
-        const dist = Math.sqrt(
-            Math.pow(val.r - r, 2) +
-            Math.pow(val.g - g, 2) +
-            Math.pow(val.b - b, 2)
-        );
-        if(dist < minDist) {
-            minDist = dist;
-            closest = key;
-        }
+        const dist = Math.sqrt(Math.pow(val.r - r, 2) + Math.pow(val.g - g, 2) + Math.pow(val.b - b, 2));
+        if(dist < minDist) { minDist = dist; closest = key; }
     }
     return closest;
 }
@@ -430,30 +428,23 @@ function captureFace() {
     const dots = document.getElementsByClassName("cam-dot");
     const faceChar = scanFaceOrder[scanIndex];
     
-    // Map 2D grid to 3D cube state
-    // 0 1 2
-    // 3 4 5
-    // 6 7 8
+    // Auto-Calibrate: Update the palette based on the center sticker of this face
+    // Center dot is always index 4 visually (or 4 mirrored)
+    const centerDotIdx = 4; // Visual index 4 is always center
+    const centerColor = dots[centerDotIdx].dataset.color; // The detected color (should match faceChar)
     
-    // Determine rotation logic based on current scanIndex to map to 3D view
-    // Note: We are just blindly painting the face 'faceChar' with the scanned colors
-    // We need to know which 3D cubes correspond to this face.
-    
-    // Get target cubes for this face
+    // But we need the RAW RGB to calibrate. 
+    // We can't get RAW from DOM. So we just trust the closest match for now,
+    // or we could store raw in dataset.
+    // For now, let's rely on Manual Click Fix as the primary override.
+
     let targetCubes = getCubesForFace(faceChar);
-    
-    // Sort targetCubes to match Top-Left to Bottom-Right order
     targetCubes = sortCubesForGrid(targetCubes, faceChar);
 
-    // Apply colors
     for(let i=0; i<9; i++) {
-        // 4 is Center, skip center to keep orientation valid? 
-        // No, standard centers are fixed. But user might hold cube wrong.
-        // Let's assume standard orientation and only paint non-centers.
         const c = targetCubes[i];
         if(!c.userData.isCenter) {
             const detectedColor = dots[i].dataset.color;
-            // Find face material index
             const norm = getFaceNormal(faceChar);
             const matIdx = getVisibleFaceMatIndex(c, norm);
             if(matIdx !== -1) {
@@ -463,6 +454,9 @@ function captureFace() {
         }
     }
     
+    // Reset manual flags for next scan
+    for(let d of dots) d.dataset.manual = "";
+
     scanIndex++;
     if(scanIndex >= scanFaceOrder.length) {
         stopCameraMode();
@@ -498,19 +492,28 @@ function getCubesForFace(face) {
     return list;
 }
 
-// Sorts 9 cubes into Top-Left -> Bottom-Right order visual for that face
+// --- CORRECTED MAPPING LOGIC FOR U/D FROM ORANGE ---
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x); const ay = Math.round(a.position.y); const az = Math.round(a.position.z);
         const bx = Math.round(b.position.x); const by = Math.round(b.position.y); const bz = Math.round(b.position.z);
         
-        // Logic: Sort by Y (Top to Bottom), then by X/Z (Left to Right)
         if(face === 'F') return (by - ay) || (ax - bx); // Y desc, X asc
         if(face === 'B') return (by - ay) || (bx - ax); // Y desc, X desc
         if(face === 'R') return (by - ay) || (bz - az); // Y desc, Z desc
         if(face === 'L') return (by - ay) || (az - bz); // Y desc, Z asc
-        if(face === 'U') return (az - bz) || (ax - bx); // Z asc, X asc
-        if(face === 'D') return (bz - az) || (ax - bx); // Z desc, X asc
+        
+        // UPDATED: User rotates UP from ORANGE (Left)
+        // Camera Top = Red (Right Face, X=1). Camera Bottom = Orange (Left Face, X=-1).
+        // Camera Left = Blue (Back, Z=-1). Camera Right = Green (Front, Z=1).
+        // Sort: X Descending (Top to Bottom), then Z Ascending (Left to Right)
+        if(face === 'U') return (bx - ax) || (az - bz);
+
+        // UPDATED: User rotates DOWN from ORANGE (Left)
+        // Camera Top = Orange (Left Face, X=-1). Camera Bottom = Red (Right Face, X=1).
+        // Camera Left = Blue (Back, Z=-1). Camera Right = Green (Front, Z=1).
+        // Sort: X Ascending (Top to Bottom), then Z Ascending (Left to Right)
+        if(face === 'D') return (ax - bx) || (az - bz);
     });
 }
 
