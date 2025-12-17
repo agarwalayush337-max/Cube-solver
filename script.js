@@ -626,14 +626,15 @@ function captureFace() {
 
 // --- HELPER: Get Standard Normal Vector for a Face ID ---
 // --- HELPER: Get Logical Normal Vector for a Color Key ---
+// --- HELPER: Get Logical Vector for a Color Key ---
 function getNormalForColor(colorKey) {
     switch(colorKey) {
-        case 'U': return new THREE.Vector3(0, 1, 0);  // White -> Top
-        case 'D': return new THREE.Vector3(0, -1, 0); // Yellow -> Bottom
-        case 'F': return new THREE.Vector3(0, 0, 1);  // Green -> Front
-        case 'B': return new THREE.Vector3(0, 0, -1); // Blue -> Back
-        case 'R': return new THREE.Vector3(1, 0, 0);  // Red -> Right
-        case 'L': return new THREE.Vector3(-1, 0, 0); // Orange -> Left
+        case 'U': return new THREE.Vector3(0, 1, 0);  // White (Top)
+        case 'D': return new THREE.Vector3(0, -1, 0); // Yellow (Bottom)
+        case 'F': return new THREE.Vector3(0, 0, 1);  // Green (Front)
+        case 'B': return new THREE.Vector3(0, 0, -1); // Blue (Back)
+        case 'R': return new THREE.Vector3(1, 0, 0);  // Red (Right)
+        case 'L': return new THREE.Vector3(-1, 0, 0); // Orange (Left)
         default: return new THREE.Vector3(0, 1, 0);
     }
 }
@@ -653,11 +654,12 @@ function processScannedData() {
         return;
     }
 
-    // 1. Map Colors to the 3D Model (Standard Solved Structure)
     ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
         const faceData = centerMap[faceKey];
         if(!faceData) return;
         let targetCubes = getCubesForFace(faceKey);
+        
+        // Use the updated Sort Logic
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
         const colorsArr = faceData.colors;
@@ -675,36 +677,40 @@ function processScannedData() {
         }
     });
 
-    // --- DYNAMIC ORIENTATION FIX (COLOR BASED) ---
-    // 1. Find the Center Color of the Last Scanned Face (Face 6)
-    const lastScanData = scannedFacesData[scannedFacesData.length - 1];
-    const lastCenterColor = lastScanData[4]; // The center sticker color (e.g., 'R', 'D', 'U')
+    // --- DYNAMIC ORIENTATION FIX (ROBUST) ---
+    // 1. Get the Color of the Last Scanned Face (Face 6)
+    const lastScanData = scannedFacesData[5]; 
+    const lastCenterColor = lastScanData[4]; 
 
-    // 2. Find the Center Color of the 5th Scanned Face
-    const secondLastScanData = scannedFacesData[scannedFacesData.length - 2];
+    // 2. Get the Color of the 5th Scanned Face (Face 5)
+    const secondLastScanData = scannedFacesData[4];
     const secondLastCenterColor = secondLastScanData[4];
 
-    // 3. Get the logical vectors for these colors
-    // Example: If last was Red, we want the Red Face (Vector 1,0,0) to face Camera (0,0,1)
-    const targetFrontVec = getNormalForColor(lastCenterColor); 
-    const targetTopVec = getNormalForColor(secondLastCenterColor);
+    // 3. Get the Vectors where these faces physically live on a solved cube
+    const vecFront = getNormalForColor(lastCenterColor); // e.g., Yellow (0,-1,0)
+    const vecTop   = getNormalForColor(secondLastCenterColor); // e.g., Orange (-1,0,0)
 
-    // 4. Construct Rotation Matrix to align these colored faces to Camera Front/Top
-    const targetRightVec = new THREE.Vector3().crossVectors(targetTopVec, targetFrontVec);
-    const orientationMatrix = new THREE.Matrix4().makeBasis(targetRightVec, targetTopVec, targetFrontVec);
-    const invMatrix = orientationMatrix.invert();
-
-    // 5. Apply Rotation
-    pivotGroup.rotation.set(0, 0, 0); 
+    // 4. Create a Basis Matrix that matches the Camera View
+    // Camera View requires: Front Axis (Z), Top Axis (Y), Right Axis (X)
+    const vecRight = new THREE.Vector3().crossVectors(vecTop, vecFront).normalize();
+    
+    // Create matrix where columns are Right, Top, Front
+    const m = new THREE.Matrix4();
+    m.makeBasis(vecRight, vecTop, vecFront);
+    
+    // 5. Apply the INVERSE of this matrix to the pivot group
+    // This rotates the world so that vecFront becomes Z+ and vecTop becomes Y+
+    const invM = m.invert();
+    
+    pivotGroup.rotation.set(0, 0, 0);
     pivotGroup.updateMatrixWorld();
-    pivotGroup.quaternion.setFromRotationMatrix(invMatrix);
+    pivotGroup.quaternion.setFromRotationMatrix(invM);
 
     statusEl.innerText = "Scan Mapped! Solving...";
     runLogicalAutofill(false); 
     updatePaletteCounts();
     solveCube();
 }
-
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
     if(face === 'D') return new THREE.Vector3(0,-1,0);
@@ -753,10 +759,13 @@ function sortCubesForGrid(list, face) {
         // L (Left): Standard mapping
         if(face === 'L') return (by - ay) || (az - bz);
         
-        // D (Bottom) - Corrected for "rotateZ(90deg) rotateX(90deg)"
-        // Screen Y (Rows) maps to Cube X (Left->Right)
-        // Screen X (Cols) maps to Cube Z (Back->Front)
-        if(face === 'D') return (ax - bx) || (az - bz);
+        // D (Bottom) - FIXED for "rotateZ(90) rotateX(90)"
+        // With that rotation: 
+        // Screen Top Row = Back Edge (Z=-1)
+        // Screen Bottom Row = Front Edge (Z=1)
+        // Screen Left Col = Left Edge (X=-1)
+        // Screen Right Col = Right Edge (X=1)
+        if(face === 'D') return (az - bz) || (ax - bx);
     });
 }
 
