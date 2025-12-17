@@ -662,10 +662,10 @@ function processScannedData() {
         }
     });
 
-    // --- NEW: SET FINAL ORIENTATION ---
-    // Last Scanned (Bottom/Yellow) -> FRONT (Facing Camera)
-    // 5th Scanned (Left/Orange) -> TOP
-    pivotGroup.rotation.set(Math.PI / 2, 0, -Math.PI / 2);
+    // --- FINAL ORIENTATION FIX ---
+    // 1. Rotate X by -90 deg: Brings Bottom (Last Scanned) to Front.
+    // 2. Rotate Z by -90 deg: Brings Left (2nd Last Scanned) to Top.
+    pivotGroup.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
     pivotGroup.updateMatrixWorld();
 
     statusEl.innerText = "Scan Mapped! Solving...";
@@ -673,6 +673,7 @@ function processScannedData() {
     updatePaletteCounts();
     solveCube();
 }
+
 
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
