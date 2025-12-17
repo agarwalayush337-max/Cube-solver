@@ -460,14 +460,15 @@ function stopCameraMode() {
 }
 
 // SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom (From Left)
+// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom (From Left)
 const SCAN_ORDER = [
     { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, 
     { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   
     { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, 
     { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },
     { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },
-    // 6. Rotate UP from Left: Maintain Left's Y rotation, tilt X Up
-    { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" } 
+    // FIXED: Use rotateZ(-90deg) to tip UP correctly from the Left face
+    { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateZ(-90deg)" } 
 ];
 
 function updateCamInstruction() {
@@ -694,10 +695,12 @@ function sortCubesForGrid(list, face) {
         // L (Left): Y desc (Top->Bottom), Z asc (Back->Front)
         if(face === 'L') return (by - ay) || (az - bz);
         
-        // D (Bottom) - SPECIAL CASE for "Rotate Up from Left"
-        // View is rotated: Screen Top is Cube Left (x=-1), Screen Right is Cube Front (z=1)
-        // Primary Sort (Rows): X asc (-1 to 1)
-        // Secondary Sort (Cols): Z asc (-1 to 1)
+        // D (Bottom) - SPECIAL MAPPING for "Rotate Up from Left"
+        // When tilted up from Left:
+        // - The edge touching Left(Orange) is at the TOP of the scan (Row 0). This is x=-1.
+        // - The edge touching Right(Red) is at the BOTTOM of the scan. This is x=1.
+        // - The edge touching Back(Blue) is at the LEFT of the scan. This is z=-1.
+        // - The edge touching Front(Green) is at the RIGHT of the scan. This is z=1.
         if(face === 'D') return (ax - bx) || (az - bz);
     });
 }
