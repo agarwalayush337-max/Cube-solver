@@ -702,26 +702,25 @@ function sortCubesForGrid(list, face) {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): 180° Rotation (Z Ascending, X Descending)
-        if(face === 'U') return (az - bz) || (bx - ax);
+        // U (Top): 180° Inversion from previous (Z Descending, X Ascending)
+        if(face === 'U') return (bz - az) || (ax - bx);
         
-        // F (Front): 90° Left (X Descending, Y Descending)
+        // F (Front): PERFECT (Kept: X Descending, Y Descending)
         if(face === 'F') return (bx - ax) || (by - ay);
         
-        // R (Right): 90° Left (Z Ascending, Y Descending)
-        if(face === 'R') return (az - bz) || (by - ay);
+        // R (Right): 90° Anti-Clockwise from previous (Y Descending, Z Ascending)
+        if(face === 'R') return (by - ay) || (az - bz);
         
-        // B (Back): 90° Left (X Ascending, Y Descending)
-        if(face === 'B') return (ax - bx) || (by - ay);
+        // B (Back): 180° Rotation from previous (X Descending, Y Ascending)
+        if(face === 'B') return (bx - ax) || (ay - by);
         
-        // L (Left): 90° Left (Z Descending, Y Descending)
+        // L (Left): PERFECT (Kept: Z Descending, Y Descending)
         if(face === 'L') return (bz - az) || (by - ay);
         
-        // D (Bottom): 90° Left relative to previous (Z Descending, X Ascending)
-        if(face === 'D') return (bz - az) || (ax - bx);
+        // D (Bottom): 90° Clockwise from previous (X Ascending, Z Ascending)
+        if(face === 'D') return (ax - bx) || (az - bz);
     });
 }
-
 
 function getColorKey(hex) {
     for (const k in colors) { if (k !== "Core" && colors[k] === hex) return k; }
