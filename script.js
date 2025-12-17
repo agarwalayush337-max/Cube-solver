@@ -644,7 +644,7 @@ function processScannedData() {
         if(!faceData) return;
         let targetCubes = getCubesForFace(faceKey);
         
-        // Use the Correct Sorting Function from previous steps
+        // Use the Correct Sorting Function
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
         const colorsArr = faceData.colors;
@@ -662,23 +662,16 @@ function processScannedData() {
         }
     });
 
-    // --- FINAL ORIENTATION FIX (MATRIX METHOD) ---
-    // Forces the exact view you requested:
-    // 1. Cube Bottom (Yellow)  -> Faces Camera (Front)
-    // 2. Cube Left (Orange)    -> Faces Up (Top)
-    
-    const orientationMatrix = new THREE.Matrix4();
-    orientationMatrix.makeBasis(
-        new THREE.Vector3(0, -1, 0), // Local X (Right) points DOWN
-        new THREE.Vector3(0, 0, -1), // Local Y (Top)   points BACK
-        new THREE.Vector3(1, 0, 0)   // Local Z (Front) points RIGHT
-    );
-    // Result: Local -Y (Bottom) points FRONT. Local -X (Left) points UP.
-    
-    const targetQuat = new THREE.Quaternion();
-    targetQuat.setFromRotationMatrix(orientationMatrix);
-    pivotGroup.quaternion.copy(targetQuat);
+    // --- FINAL ORIENTATION FIX (WORLD AXIS) ---
+    // 1. Reset to standard alignment
+    pivotGroup.rotation.set(0, 0, 0);
     pivotGroup.updateMatrixWorld();
+    
+    // 2. Rotate X by -90: brings Bottom (Y-) to Front (Z+)
+    pivotGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+    
+    // 3. Rotate Z by -90: brings Left (X-) to Top (Y+)
+    pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -Math.PI / 2);
 
     statusEl.innerText = "Scan Mapped! Solving...";
     runLogicalAutofill(false); 
