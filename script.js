@@ -678,10 +678,15 @@ const GRID_TO_CUBE_MAP = {
         {x:-1, y:-1, z:-1}, {x:-1, y:-1, z: 0}, {x:-1, y:-1, z: 1}
     ],
     /* USE THIS ONLY IF THE ABOVE IS SIDEWAYS */
-    'D': [ 
-        {x:-1, y:-1, z: 1}, {x:-1, y:-1, z: 0}, {x:-1, y:-1, z:-1}, // Left Col
-        {x: 0, y:-1, z: 1}, {x: 0, y:-1, z: 0}, {x: 0, y:-1, z:-1}, // Center Col
-        {x: 1, y:-1, z: 1}, {x: 1, y:-1, z: 0}, {x: 1, y:-1, z:-1}  // Right Col
+    'D': [ // Bottom Face (y=-1) -> FIXED MAPPING
+        // Row 1 (Top of Camera): Back Edge (z=-1)
+        {x:-1, y:-1, z:-1}, {x:0, y:-1, z:-1}, {x:1, y:-1, z:-1},
+        
+        // Row 2 (Middle of Camera): Middle (z=0)
+        {x:-1, y:-1, z: 0}, {x:0, y:-1, z: 0}, {x:1, y:-1, z: 0},
+        
+        // Row 3 (Bottom of Camera): Front Edge (z=1)
+        {x:-1, y:-1, z: 1}, {x:0, y:-1, z: 1}, {x:1, y:-1, z: 1}
     ]
 };
 
