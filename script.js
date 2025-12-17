@@ -1204,14 +1204,45 @@ function onInputStart(e) {
     const cx = e.touches ? e.touches[0].clientX : e.clientX, cy = e.touches ? e.touches[0].clientY : e.clientY;
     startMouse = { x: cx, y: cy }; lastMouse = { x: cx, y: cy };
 }
+// FIX: FREE TRACKBALL ROTATION (No Gimbal Lock)
 function onInputMove(e) {
     if (!isMouseDown) return;
-    const cx = e.touches ? e.touches[0].clientX : e.clientX, cy = e.touches ? e.touches[0].clientY : e.clientY;
-    const dx = cx - lastMouse.x, dy = cy - lastMouse.y;
-    if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) isDragging = true;
-    if (isDragging) { pivotGroup.rotation.y += dx * 0.006; pivotGroup.rotation.x += dy * 0.006; if(solutionMoves.length > 0) { updateDisplayMoves(); updateStepStatus(); } }
+    
+    // 1. Get Mouse Coordinates
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    
+    // 2. Calculate Distance Moved
+    const dx = cx - lastMouse.x;
+    const dy = cy - lastMouse.y;
+    
+    // 3. Detect Drag Intent
+    if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) {
+        isDragging = true;
+    }
+    
+    if (isDragging) {
+        // 4. Apply Rotation on WORLD AXES (Screen Axes)
+        // This ignores the cube's current tilt, preventing Gimbal Lock.
+        
+        const moveSpeed = 0.006;
+        
+        // Rotate around World Y (Vertical axis of screen) for Left/Right drag
+        pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), dx * moveSpeed);
+        
+        // Rotate around World X (Horizontal axis of screen) for Up/Down drag
+        pivotGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), dy * moveSpeed);
+        
+        // Update UI if needed
+        if(solutionMoves.length > 0) { 
+            updateDisplayMoves(); 
+            updateStepStatus(); 
+        } 
+    }
+    
     lastMouse = { x: cx, y: cy };
 }
+
 function onInputEnd(e) {
     isMouseDown = false;
     if (!isDragging) {
