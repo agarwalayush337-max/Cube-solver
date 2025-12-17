@@ -1205,35 +1205,36 @@ function onInputStart(e) {
     startMouse = { x: cx, y: cy }; lastMouse = { x: cx, y: cy };
 }
 // FIX: FREE TRACKBALL ROTATION (No Gimbal Lock)
+// FIX: FLAT ROTATION (Dominant Axis Locking)
+// FIX: FLAT ROTATION (Dominant Axis Locking)
 function onInputMove(e) {
     if (!isMouseDown) return;
     
-    // 1. Get Mouse Coordinates
     const cx = e.touches ? e.touches[0].clientX : e.clientX;
     const cy = e.touches ? e.touches[0].clientY : e.clientY;
     
-    // 2. Calculate Distance Moved
     const dx = cx - lastMouse.x;
     const dy = cy - lastMouse.y;
     
-    // 3. Detect Drag Intent
     if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) {
         isDragging = true;
     }
     
     if (isDragging) {
-        // 4. Apply Rotation on WORLD AXES (Screen Axes)
-        // This ignores the cube's current tilt, preventing Gimbal Lock.
-        
         const moveSpeed = 0.006;
         
-        // Rotate around World Y (Vertical axis of screen) for Left/Right drag
-        pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), dx * moveSpeed);
+        // DOMINANT AXIS CHECK
+        // If moving mostly Left/Right, ONLY rotate horizontally (Y-axis)
+        // If moving mostly Up/Down, ONLY rotate vertically (X-axis)
         
-        // Rotate around World X (Horizontal axis of screen) for Up/Down drag
-        pivotGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), dy * moveSpeed);
+        if (Math.abs(dx) > Math.abs(dy)) {
+            // Horizontal Drag -> World Y Rotation
+            pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), dx * moveSpeed);
+        } else {
+            // Vertical Drag -> World X Rotation
+            pivotGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), dy * moveSpeed);
+        }
         
-        // Update UI if needed
         if(solutionMoves.length > 0) { 
             updateDisplayMoves(); 
             updateStepStatus(); 
@@ -1242,6 +1243,7 @@ function onInputMove(e) {
     
     lastMouse = { x: cx, y: cy };
 }
+
 
 function onInputEnd(e) {
     isMouseDown = false;
