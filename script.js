@@ -644,7 +644,7 @@ function processScannedData() {
         if(!faceData) return;
         let targetCubes = getCubesForFace(faceKey);
         
-        // Use the NEW Correct Sorting Function
+        // Use the Correct Sorting Function
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
         const colorsArr = faceData.colors;
@@ -661,6 +661,12 @@ function processScannedData() {
             }
         }
     });
+
+    // --- NEW: SET FINAL ORIENTATION ---
+    // Last Scanned (Bottom/Yellow) -> FRONT (Facing Camera)
+    // 5th Scanned (Left/Orange) -> TOP
+    pivotGroup.rotation.set(Math.PI / 2, 0, -Math.PI / 2);
+    pivotGroup.updateMatrixWorld();
 
     statusEl.innerText = "Scan Mapped! Solving...";
     runLogicalAutofill(false); 
