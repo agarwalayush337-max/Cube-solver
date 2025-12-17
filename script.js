@@ -461,45 +461,47 @@ function stopCameraMode() {
 
 // SEQUENCE: Front -> Top -> Right -> Back -> Left -> Bottom
 // This matches the video: Tilt Down, then Rotate Right, Right, Right, then Tilt to Bottom.
+// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom (From Left)
 const SCAN_ORDER = [
-    { name: "FRONT", id: "face-0", rot: "rotateX(0deg) rotateY(0deg)" },   // 1. Start Front
-    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" },             // 2. Rotate DOWN to see Top
-    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" },             // 3. Rotate RIGHT to see Right
-    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },            // 4. Rotate RIGHT to see Back
-    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },            // 5. Rotate RIGHT to see Left
-    // 6. From Left, we rotate to Bottom.
-    // To go Left -> Bottom visually, we keep the Y rotation (-270) and tilt X up (90).
-    { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" } 
+    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" },                     // 1. Start Top
+    { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },                       // 2. Rotate to Front
+    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" },                     // 3. Rotate to Right
+    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },                    // 4. Rotate to Back
+    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },                    // 5. Rotate to Left
+    { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" }      // 6. Rotate Up from Left to Bottom
 ];
 
 function updateCamInstruction() {
     if(scanIndex >= 6) return;
     const step = SCAN_ORDER[scanIndex];
-    
-    // Apply rotation to the 3D Guide Cube
     liveCube.style.transform = step.rot;
     
-    // Instructions matching the video flow
-    if(scanIndex === 0) {
-        camMsg.innerText = "1. Scan FRONT";
-        camSubMsg.innerText = "Hold the cube facing you";
-    } else if(scanIndex === 1) {
-        camMsg.innerText = "2. Rotate DOWN -> Scan TOP";
-        camSubMsg.innerText = "Tilt cube forward to see the Top";
-    } else if(scanIndex === 2) {
-        camMsg.innerText = "3. Rotate RIGHT -> Scan RIGHT";
-        camSubMsg.innerText = "Turn cube left to see Right face";
-    } else if(scanIndex === 3) {
-        camMsg.innerText = "4. Rotate RIGHT -> Scan BACK";
-        camSubMsg.innerText = "Turn cube left to see Back face";
-    } else if(scanIndex === 4) {
-        camMsg.innerText = "5. Rotate RIGHT -> Scan LEFT";
-        camSubMsg.innerText = "Turn cube left to see Left face";
-    } else if(scanIndex === 5) {
-        camMsg.innerText = "6. Rotate UP -> Scan BOTTOM";
-        camSubMsg.innerText = "Tilt cube back to see Bottom face";
+    if(scanIndex === 0) { 
+        camMsg.innerText = "1. Scan TOP (White)"; 
+        camSubMsg.innerText = "Start with the Top face"; 
+    }
+    else if(scanIndex === 1) { 
+        camMsg.innerText = "2. Rotate UP -> Scan FRONT"; 
+        camSubMsg.innerText = "Tilt cube to see Front (Green)"; 
+    }
+    else if(scanIndex === 2) { 
+        camMsg.innerText = "3. Rotate RIGHT -> Scan RIGHT"; 
+        camSubMsg.innerText = "Turn cube left to see Right (Red)"; 
+    }
+    else if(scanIndex === 3) { 
+        camMsg.innerText = "4. Rotate RIGHT -> Scan BACK"; 
+        camSubMsg.innerText = "Turn cube left to see Back (Blue)"; 
+    }
+    else if(scanIndex === 4) { 
+        camMsg.innerText = "5. Rotate RIGHT -> Scan LEFT"; 
+        camSubMsg.innerText = "Turn cube left to see Left (Orange)"; 
+    }
+    else if(scanIndex === 5) { 
+        camMsg.innerText = "6. Rotate UP -> Scan BOTTOM"; 
+        camSubMsg.innerText = "Tilt cube up (from Left) to see Bottom (Yellow)"; 
     }
 }
+
 
 function processCameraFrame() {
     if(!isCameraActive) return;
@@ -698,19 +700,28 @@ function sortCubesForGrid(list, face) {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        if(face === 'F') return (by - ay) || (ax - bx);
-        if(face === 'B') return (by - ay) || (bx - ax);
-        if(face === 'R') return (by - ay) || (bz - az);
-        if(face === 'L') return (by - ay) || (az - bz);
-        
-        // U (Top): Standard view from Front is Back->Front (Z desc)
+        // U (Top): Standard mapping (Back->Front, Left->Right)
         if(face === 'U') return (az - bz) || (ax - bx);
         
-        // D (Bottom): From Left, Bottom is viewed with Left face 'up'.
-        // This mapping ensures the camera grid matches the 3D cube face correctly.
-        if(face === 'D') return (az - bz) || (ax - bx);
+        // F (Front): Standard mapping (Top->Bottom, Left->Right)
+        if(face === 'F') return (by - ay) || (ax - bx);
+        
+        // R (Right): Standard mapping (Top->Bottom, Front->Back)
+        if(face === 'R') return (by - ay) || (bz - az);
+        
+        // B (Back): Standard mapping (Top->Bottom, Right->Left)
+        if(face === 'B') return (by - ay) || (bx - ax);
+        
+        // L (Left): Standard mapping (Top->Bottom, Back->Front)
+        if(face === 'L') return (by - ay) || (az - bz);
+        
+        // D (Bottom) - Mapped for "Rotate Up from Left"
+        // Screen Top=LeftEdge(x=-1), Bottom=RightEdge(x=1)
+        // Screen Left=BackEdge(z=-1), Right=FrontEdge(z=1)
+        if(face === 'D') return (ax - bx) || (az - bz);
     });
 }
+
 
 function getColorKey(hex) {
     for (const k in colors) { if (k !== "Core" && colors[k] === hex) return k; }
