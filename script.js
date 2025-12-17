@@ -640,81 +640,46 @@ const NEIGHBOR_MAP = {
 };
 
 function processScannedData() {
-    // 1. Identify all 6 centers from the scan
-    const centers = scannedFacesData.map(face => face[4]); // Center is always index 4
+    const centerMap = {}; 
+    const centersFound = [];
     
-    // 2. Normalize Orientation for each face
-    const correctedFacesData = scannedFacesData.map((faceColors, scanIdx) => {
-        const myCenter = faceColors[4];
-        let targetNeighbor, myEdgeToNeighbor;
-
-        // Based on SCAN_ORDER, we pick a reliable "Physical Neighbor" for each scan
-        // to check orientation against.
-        if (scanIdx === 0) { // TOP SCAN
-            // The "Bottom" of the camera screen touches the "Front" Scan (Index 1)
-            targetNeighbor = centers[1]; 
-            myEdgeToNeighbor = 2; // Index 2 = Bottom in [Top, Right, Bottom, Left]
-        } 
-        else if (scanIdx === 1) { // FRONT SCAN
-            // The "Top" of the camera screen touches the "Top" Scan (Index 0)
-            targetNeighbor = centers[0]; 
-            myEdgeToNeighbor = 0; // Index 0 = Top
-        } 
-        else if (scanIdx === 2) { // RIGHT SCAN
-            // The "Left" of the camera screen touches the "Front" Scan (Index 1)
-            targetNeighbor = centers[1]; 
-            myEdgeToNeighbor = 3; // Index 3 = Left
-        } 
-        else if (scanIdx === 3) { // BACK SCAN
-            // The "Right" of the camera screen touches the "Left" Scan (Index 4)
-            // (Wait, Back's Right is physically touching Left's Left in the strip? 
-            // Let's use Right(2) which is to the Left of Back)
-            targetNeighbor = centers[2]; 
-            myEdgeToNeighbor = 3; // Left side of screen touches Right Face
-        } 
-        else if (scanIdx === 4) { // LEFT SCAN
-            // The "Right" of the camera screen touches the "Front" Scan (Index 1)
-            targetNeighbor = centers[1]; 
-            myEdgeToNeighbor = 1; // Index 1 = Right
-        } 
-        else if (scanIdx === 5) { // BOTTOM SCAN
-            // The "Top" of the camera screen touches the "Front" Scan (Index 1)
-            targetNeighbor = centers[1]; 
-            myEdgeToNeighbor = 0; // Index 0 = Top
-        }
-
-        // 3. Calculate Rotation
-        // Where does the Standard Cube say this neighbor SHOULD be?
-        const standardNeighbors = NEIGHBOR_MAP[myCenter];
-        const standardPos = standardNeighbors.indexOf(targetNeighbor);
-        
-        if (standardPos === -1) {
-            console.warn("Invalid neighbor detected. Cube might be scrambled or read wrong.");
-            return faceColors; // Fallback
-        }
-
-        // Calculate difference between "Where it is in Scan" vs "Where it is in Standard"
-        // 0=0°, 1=90°, 2=180°, 3=270° (Clockwise)
-        // We want to rotate the grid so 'myEdgeToNeighbor' aligns with 'standardPos'
-        let rotationNeeded = (standardPos - myEdgeToNeighbor + 4) % 4;
-
-        // 4. Rotate the 9-color array
-        return rotateFaceArray(faceColors, rotationNeeded);
+    // Map data and track the original scan index (0 to 5)
+    scannedFacesData.forEach((faceData, idx) => {
+        const centerColor = faceData[4]; 
+        centerMap[centerColor] = { colors: faceData, originalIdx: idx };
+        centersFound.push(centerColor);
     });
 
-    // 5. Paint the Cube
-    correctedFacesData.forEach(faceData => {
-        const faceKey = faceData[4]; // Center color
-        let targetCubes = getCubesForFace(faceKey);
-        targetCubes = sortCubesForGrid(targetCubes, faceKey); // Use Standard Sort
+    const unique = new Set(centersFound);
+    if(unique.size !== 6) {
+        alert("Scan Error: Duplicate centers detected. Please rescan.");
+        return;
+    }
+
+    ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
+        const faceData = centerMap[faceKey];
+        if(!faceData) return;
         
+        let targetCubes = getCubesForFace(faceKey);
+        // Use your working sort function
+        targetCubes = sortCubesForGrid(targetCubes, faceKey);
+        
+        let colorsArr = [...faceData.colors];
+
+        // --- FIX: ROTATE ONLY THE LAST SCANNED FACE ---
+        // If this is the 6th face scanned (Index 5), rotate pixels 90° Anti-Clockwise
+        if (faceData.originalIdx === 5) {
+            colorsArr = rotateAntiClockwise(colorsArr);
+        }
+
         for(let i=0; i<9; i++) {
             const c = targetCubes[i];
             if(!c.userData.isCenter) {
+                const colorCode = colorsArr[i];
                 const norm = getFaceNormal(faceKey);
                 const matIdx = getVisibleFaceMatIndex(c, norm);
                 if(matIdx !== -1) {
-                    c.material[matIdx].color.setHex(colors[faceData[i]]);
+                    c.material[matIdx].color.setHex(colors[colorCode]);
                     c.material[matIdx].needsUpdate = true;
                 }
             }
@@ -727,6 +692,23 @@ function processScannedData() {
     solveCube();
 }
 
+// Helper: Rotates the 3x3 array 90 degrees Anti-Clockwise
+// [0,1,2]       [2,5,8]
+// [3,4,5]  -->  [1,4,7]
+// [6,7,8]       [0,3,6]
+function rotateAntiClockwise(arr) {
+    const newArr = new Array(9);
+    newArr[0] = arr[2];
+    newArr[1] = arr[5];
+    newArr[2] = arr[8];
+    newArr[3] = arr[1];
+    newArr[4] = arr[4];
+    newArr[5] = arr[7];
+    newArr[6] = arr[0];
+    newArr[7] = arr[3];
+    newArr[8] = arr[6];
+    return newArr;
+}
 // Helper: Rotate a 1D array of 9 elements (representing 3x3 grid) clockwise
 function rotateFaceArray(arr, times) {
     let res = [...arr];
@@ -783,33 +765,23 @@ function getCubesForFace(face) {
 
 // PART 1: STANDARD MAPPING (Do not change this again)
 // This maps the camera grid 1:1 to the cube face.
-/* =========================================================
-   FINAL FIX: STANDARD + BOTTOM ROTATED 90° ACW
-   ========================================================= */
-
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): Standard (Back-Left -> Front-Right)
+        // U (Top): Back-Left -> Front-Right
         if(face === 'U') return (az - bz) || (ax - bx);
-        
-        // F (Front): Standard (Top-Left -> Bottom-Right)
+        // F (Front): Top-Left -> Bottom-Right
         if(face === 'F') return (by - ay) || (ax - bx);
-        
-        // R (Right): Standard (Top-Front -> Bottom-Back)
+        // R (Right): Top-Front -> Bottom-Back
         if(face === 'R') return (by - ay) || (bz - az);
-        
-        // B (Back): Standard (Top-Right -> Bottom-Left)
+        // B (Back): Top-Right -> Bottom-Left
         if(face === 'B') return (by - ay) || (bx - ax);
-        
-        // L (Left): Standard (Top-Back -> Bottom-Front)
+        // L (Left): Top-Back -> Bottom-Front
         if(face === 'L') return (by - ay) || (az - bz);
-        
-        // D (Bottom): 90° Anti-Clockwise
-        // Logic: Sort X Descending (Right edge is Top), then Z Descending (Front is Left)
-        if(face === 'D') return (bx - ax) || (bz - az);
+        // D (Bottom): Front-Left -> Back-Right
+        if(face === 'D') return (bz - az) || (ax - bx);
     });
 }
 
