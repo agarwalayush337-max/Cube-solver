@@ -702,22 +702,22 @@ function sortCubesForGrid(list, face) {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): Inverted Sort (Front-Right -> Back-Left)
-        if(face === 'U') return (bz - az) || (bx - ax);
+        // U (Top): Swap Axes to fix 90° rotation (Sort X then Z)
+        if(face === 'U') return (ax - bx) || (az - bz);
         
-        // F (Front): Inverted Sort (Bottom-Right -> Top-Left)
-        if(face === 'F') return (ay - by) || (bx - ax);
+        // F (Front): Swap Axes to fix 90° rotation (Sort X then Y)
+        if(face === 'F') return (ax - bx) || (by - ay);
         
-        // R (Right): Inverted Sort
-        if(face === 'R') return (ay - by) || (az - bz);
+        // R (Right): Swap Axes to fix 90° rotation (Sort Z then Y)
+        if(face === 'R') return (bz - az) || (by - ay);
         
-        // B (Back): Inverted Sort
-        if(face === 'B') return (ay - by) || (ax - bx);
+        // B (Back): Swap Axes to fix 90° rotation (Sort X then Y)
+        if(face === 'B') return (bx - ax) || (by - ay);
         
-        // L (Left): Inverted Sort
-        if(face === 'L') return (ay - by) || (bz - az);
+        // L (Left): Fix 180° Inversion (Back to Standard Y then Z)
+        if(face === 'L') return (by - ay) || (az - bz);
         
-        // D (Bottom): Inverted Sort
+        // D (Bottom): PERFECT (Keep exactly as is)
         if(face === 'D') return (bx - ax) || (bz - az);
     });
 }
