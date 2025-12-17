@@ -468,7 +468,7 @@ const SCAN_ORDER = [
     { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" },                     // 3. Rotate to Right
     { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },                    // 4. Rotate to Back
     { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },                    // 5. Rotate to Left
-    { name: "BOTTOM",id: "face-5", rot: "rotateX(90deg) rotateZ(90deg)" }      // 6. Rotate Up from Left to Bottom
+    { name: "BOTTOM",id: "face-5", rot: "rotateZ(90deg)" }      // 6. Rotate Up from Left to Bottom
 ];
 
 function updateCamInstruction() {
