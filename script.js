@@ -696,30 +696,29 @@ function getCubesForFace(face) {
 // --- FIX: EXACT ORIENTATION MAPPING ---
 // This ensures colors land on the 3D cube EXACTLY as they appear in the camera grid
 // Ensure the 3D mapping knows this specific 'Front -> Top' orientation for accurate colors
+// --- FIX: EXACT ORIENTATION MAPPING (INVERTED 180°) ---
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): Standard mapping
-        if(face === 'U') return (az - bz) || (ax - bx);
+        // U (Top): Inverted Sort (Front-Right -> Back-Left)
+        if(face === 'U') return (bz - az) || (bx - ax);
         
-        // F (Front): Standard mapping
-        if(face === 'F') return (by - ay) || (ax - bx);
+        // F (Front): Inverted Sort (Bottom-Right -> Top-Left)
+        if(face === 'F') return (ay - by) || (bx - ax);
         
-        // R (Right): Standard mapping
-        if(face === 'R') return (by - ay) || (bz - az);
+        // R (Right): Inverted Sort
+        if(face === 'R') return (ay - by) || (az - bz);
         
-        // B (Back): Standard mapping
-        if(face === 'B') return (by - ay) || (bx - ax);
+        // B (Back): Inverted Sort
+        if(face === 'B') return (ay - by) || (ax - bx);
         
-        // L (Left): Standard mapping
-        if(face === 'L') return (by - ay) || (az - bz);
+        // L (Left): Inverted Sort
+        if(face === 'L') return (ay - by) || (bz - az);
         
-        // D (Bottom) - Corrected for "rotateZ(90deg) rotateX(90deg)"
-        // Screen Y (Rows) maps to Cube X (Left->Right)
-        // Screen X (Cols) maps to Cube Z (Back->Front)
-        if(face === 'D') return (ax - bx) || (az - bz);
+        // D (Bottom): Inverted Sort
+        if(face === 'D') return (bx - ax) || (bz - az);
     });
 }
 
