@@ -1,5 +1,5 @@
 /* =========================================================
-   RUBIK'S CUBE SOLVER – VISUAL GUIDE EDITION (PERFECT SCAN)
+   RUBIK'S CUBE SOLVER – VISUAL GUIDE (ORIENTATION FIXED)
    ========================================================= */
 
 /* =======================
@@ -190,10 +190,9 @@ guideStyle.innerHTML = `
         letter-spacing: 1px;
     }
     
-    /* Responsive Grid Overlay */
     #grid-overlay {
         position: absolute;
-        width: min(70vw, 70vh); /* Responsive Size */
+        width: min(70vw, 70vh);
         height: min(70vw, 70vh);
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
@@ -223,8 +222,7 @@ camOverlay.innerHTML = `
             <video id="cam-video" autoplay playsinline style="height:100%; width:100%; object-fit:cover;"></video>
             <canvas id="cam-canvas" style="display:none;"></canvas>
             
-            <div id="grid-overlay">
-                </div>
+            <div id="grid-overlay"></div>
             
             <button id="btn-capture" class="nav-btn" style="background:#00ff88; color:#000; bottom: 20px;">CAPTURE</button>
         </div>
@@ -461,12 +459,14 @@ function stopCameraMode() {
     }
 }
 
+// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom (From Left)
 const SCAN_ORDER = [
     { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" }, 
     { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },   
     { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" }, 
     { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },
     { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },
+    // 6. Rotate UP from Left: Maintain Left's Y rotation, tilt X Up
     { name: "BOTTOM",id: "face-5", rot: "rotateY(-270deg) rotateX(90deg)" } 
 ];
 
@@ -480,60 +480,44 @@ function updateCamInstruction() {
     else if(scanIndex === 2) { camMsg.innerText = "3. Rotate RIGHT"; camSubMsg.innerText = "To see Right (Red)"; }
     else if(scanIndex === 3) { camMsg.innerText = "4. Rotate RIGHT"; camSubMsg.innerText = "To see Back (Blue)"; }
     else if(scanIndex === 4) { camMsg.innerText = "5. Rotate RIGHT"; camSubMsg.innerText = "To see Left (Orange)"; }
-    else if(scanIndex === 5) { camMsg.innerText = "6. Rotate UP"; camSubMsg.innerText = "To see Bottom (Yellow)"; }
+    else if(scanIndex === 5) { camMsg.innerText = "6. Rotate UP (from Left)"; camSubMsg.innerText = "To see Bottom (Yellow)"; }
 }
 
 function processCameraFrame() {
     if(!isCameraActive) return;
 
     if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
-        // --- CRITICAL FIX: MAP GRID DOM RECT TO VIDEO SOURCE PIXELS ---
-        // 1. Get Visual Grid Rectangle on Screen
         const gridRect = gridEl.getBoundingClientRect();
-        
-        // 2. Get Video Element Rectangle on Screen
         const videoRect = videoEl.getBoundingClientRect();
-
-        // 3. Calculate "Displayed" Video Dimensions (handling object-fit: cover)
         const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
         const displayRatio = videoRect.width / videoRect.height;
-        
         let renderW, renderH, renderX, renderY;
         
-        // Calculate the actual size of the video image as rendered in DOM
         if (displayRatio > videoRatio) {
-            // Video is fitted by width, vertical is cropped
             renderW = videoRect.width;
             renderH = videoRect.width / videoRatio;
             renderX = 0;
             renderY = (videoRect.height - renderH) / 2;
         } else {
-            // Video is fitted by height, horizontal is cropped
             renderW = videoRect.height * videoRatio;
             renderH = videoRect.height;
             renderX = (videoRect.width - renderW) / 2;
             renderY = 0;
         }
 
-        // 4. Determine Grid Position relative to the Rendered Video
-        // (Grid Left relative to videoRect Left) - (Video Image Left relative to videoRect Left)
         const relGridX = (gridRect.left - videoRect.left) - renderX;
         const relGridY = (gridRect.top - videoRect.top) - renderY;
-        
-        // 5. Convert to Source Coordinates
         const scale = videoEl.videoWidth / renderW;
         const srcX = relGridX * scale;
         const srcY = relGridY * scale;
         const srcW = gridRect.width * scale;
         const srcH = gridRect.height * scale;
 
-        // Draw ONLY the Grid Area to the Canvas (300x300)
         canvasEl.width = 300;
         canvasEl.height = 300;
         const ctx2 = canvasEl.getContext("2d");
         ctx2.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, 300, 300);
         
-        // 6. Sample Colors (Standard 3x3 Grid on Canvas)
         const dots = document.getElementsByClassName("cam-dot");
         const cellW = 300 / 3;
         const cellH = 300 / 3;
@@ -552,7 +536,7 @@ function processCameraFrame() {
 
                 const dot = dots[row*3 + col];
                 if(!dot.dataset.manual) {
-                    const match = getHsvColor(r, g, b); // Using Improved HSV
+                    const match = getHsvColor(r, g, b); 
                     dot.style.backgroundColor = hexToString(colors[match]);
                     dot.dataset.color = match;
                 }
@@ -562,28 +546,15 @@ function processCameraFrame() {
     requestAnimationFrame(processCameraFrame);
 }
 
-// --- ROBUST HSV COLOR CLASSIFIER ---
 function getHsvColor(r, g, b) {
     const [h, s, v] = rgbToHsv(r, g, b);
-
-    // 1. ACHROMATIC (White/Black)
-    // Low saturation OR high brightness + warm white Hue (Yellowish)
-    if (s < 0.25 || (s < 0.40 && v > 0.8 && h > 45 && h < 90)) {
-        return 'U'; // White
-    }
-    
-    // 2. BLUE (Distinct Hue)
-    if (h > 160 && h < 270 && s > 0.3) {
-        return 'B';
-    }
-
-    // 3. HUE RANGES
+    if (s < 0.25 || (s < 0.40 && v > 0.8 && h > 45 && h < 90)) return 'U';
+    if (h > 160 && h < 270 && s > 0.3) return 'B';
     if (h >= 330 || h <= 15) return 'R';
-    if (h > 15 && h <= 45) return 'L'; // Orange
-    if (h > 45 && h <= 85) return 'D'; // Yellow
-    if (h > 85 && h <= 160) return 'F'; // Green
-    
-    return v > 0.8 ? 'U' : 'U'; // Default to white if bright
+    if (h > 15 && h <= 45) return 'L'; 
+    if (h > 45 && h <= 85) return 'D'; 
+    if (h > 85 && h <= 160) return 'F'; 
+    return v > 0.8 ? 'U' : 'U'; 
 }
 
 function rgbToHsv(r, g, b) {
@@ -651,7 +622,10 @@ function processScannedData() {
         const faceData = centerMap[faceKey];
         if(!faceData) return;
         let targetCubes = getCubesForFace(faceKey);
+        
+        // Use the NEW Correct Sorting Function
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
+        
         const colorsArr = faceData.colors;
         for(let i=0; i<9; i++) {
             const c = targetCubes[i];
@@ -698,16 +672,33 @@ function getCubesForFace(face) {
     return list;
 }
 
+// --- FIX: EXACT ORIENTATION MAPPING ---
+// This ensures colors land on the 3D cube EXACTLY as they appear in the camera grid
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
-        const ax = Math.round(a.position.x); const ay = Math.round(a.position.y); const az = Math.round(a.position.z);
-        const bx = Math.round(b.position.x); const by = Math.round(b.position.y); const bz = Math.round(b.position.z);
-        if(face === 'F') return (by - ay) || (ax - bx);
-        if(face === 'B') return (by - ay) || (bx - ax);
-        if(face === 'R') return (by - ay) || (bz - az);
-        if(face === 'L') return (by - ay) || (az - bz);
+        const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
+        const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
+
+        // U (Top): Z asc (Back->Front), X asc (Left->Right)
         if(face === 'U') return (az - bz) || (ax - bx);
-        if(face === 'D') return (bz - az) || (ax - bx);
+        
+        // F (Front): Y desc (Top->Bottom), X asc (Left->Right)
+        if(face === 'F') return (by - ay) || (ax - bx);
+        
+        // R (Right): Y desc (Top->Bottom), Z desc (Front->Back)
+        if(face === 'R') return (by - ay) || (bz - az);
+        
+        // B (Back): Y desc (Top->Bottom), X desc (Right->Left)
+        if(face === 'B') return (by - ay) || (bx - ax);
+        
+        // L (Left): Y desc (Top->Bottom), Z asc (Back->Front)
+        if(face === 'L') return (by - ay) || (az - bz);
+        
+        // D (Bottom) - SPECIAL CASE for "Rotate Up from Left"
+        // View is rotated: Screen Top is Cube Left (x=-1), Screen Right is Cube Front (z=1)
+        // Primary Sort (Rows): X asc (-1 to 1)
+        // Secondary Sort (Cols): Z asc (-1 to 1)
+        if(face === 'D') return (ax - bx) || (az - bz);
     });
 }
 
