@@ -677,10 +677,11 @@ const GRID_TO_CUBE_MAP = {
         {x:-1, y: 0, z:-1}, {x:-1, y: 0, z: 0}, {x:-1, y: 0, z: 1},
         {x:-1, y:-1, z:-1}, {x:-1, y:-1, z: 0}, {x:-1, y:-1, z: 1}
     ],
-    'D': [ // Bottom Face (y=-1) -> Rows are Front(z=1) to Back(z=-1)
-        {x:-1, y:-1, z: 1}, {x:0, y:-1, z: 1}, {x:1, y:-1, z: 1},
-        {x:-1, y:-1, z: 0}, {x:0, y:-1, z: 0}, {x:1, y:-1, z: 0},
-        {x:-1, y:-1, z:-1}, {x:0, y:-1, z:-1}, {x:1, y:-1, z:-1}
+    /* USE THIS ONLY IF THE ABOVE IS SIDEWAYS */
+    'D': [ 
+        {x:-1, y:-1, z: 1}, {x:-1, y:-1, z: 0}, {x:-1, y:-1, z:-1}, // Left Col
+        {x: 0, y:-1, z: 1}, {x: 0, y:-1, z: 0}, {x: 0, y:-1, z:-1}, // Center Col
+        {x: 1, y:-1, z: 1}, {x: 1, y:-1, z: 0}, {x: 1, y:-1, z:-1}  // Right Col
     ]
 };
 
