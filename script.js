@@ -639,93 +639,102 @@ function getNormalForColor(colorKey) {
         default: return new THREE.Vector3(0, 1, 0);
     }
 }
-// MAP: Scan Order -> [ FaceName, NormalVector ]
-const SCAN_FACE_ORDER = [
-    { code: 'U', normal: {x:0, y:1, z:0} },  // Index 0: TOP
-    { code: 'F', normal: {x:0, y:0, z:1} },  // Index 1: FRONT
-    { code: 'R', normal: {x:1, y:0, z:0} },  // Index 2: RIGHT
-    { code: 'B', normal: {x:0, y:0, z:-1} }, // Index 3: BACK
-    { code: 'L', normal: {x:-1, y:0, z:0} }, // Index 4: LEFT
-    { code: 'D', normal: {x:0, y:-1, z:0} }  // Index 5: BOTTOM
-];
+/* ==========================================
+   SIMPLE MAPPING & ORIENTATION LOGIC
+   ========================================== */
 
-// MAP: Grid Index (0-8) -> 3D Coordinate (x,y,z) for that face
-// Standard reading order: Left-to-Right, Top-to-Bottom
+// 1. Map Camera Grid (0-8) to Logical 3D Coordinates (x,y,z)
+// This ensures the colors land exactly where they belong on a standard cube.
 const GRID_TO_CUBE_MAP = {
-    'U': [ // Top Face (y=1) -> Rows are Back(z=-1) to Front(z=1)
-        {x:-1, y:1, z:-1}, {x:0, y:1, z:-1}, {x:1, y:1, z:-1}, // Row 1
-        {x:-1, y:1, z: 0}, {x:0, y:1, z: 0}, {x:1, y:1, z: 0}, // Row 2
-        {x:-1, y:1, z: 1}, {x:0, y:1, z: 1}, {x:1, y:1, z: 1}  // Row 3
+    'U': [ // Top (Standard)
+        {x:-1, y:1, z:-1}, {x:0, y:1, z:-1}, {x:1, y:1, z:-1},
+        {x:-1, y:1, z: 0}, {x:0, y:1, z: 0}, {x:1, y:1, z: 0},
+        {x:-1, y:1, z: 1}, {x:0, y:1, z: 1}, {x:1, y:1, z: 1}
     ],
-    'F': [ // Front Face (z=1) -> Rows are Top(y=1) to Bottom(y=-1)
+    'F': [ // Front (Standard)
         {x:-1, y: 1, z:1}, {x:0, y: 1, z:1}, {x:1, y: 1, z:1},
         {x:-1, y: 0, z:1}, {x:0, y: 0, z:1}, {x:1, y: 0, z:1},
         {x:-1, y:-1, z:1}, {x:0, y:-1, z:1}, {x:1, y:-1, z:1}
     ],
-    'R': [ // Right Face (x=1) -> Rows are Top(y=1) to Bottom(y=-1)
+    'R': [ // Right (Standard)
         {x:1, y: 1, z: 1}, {x:1, y: 1, z: 0}, {x:1, y: 1, z:-1},
         {x:1, y: 0, z: 1}, {x:1, y: 0, z: 0}, {x:1, y: 0, z:-1},
         {x:1, y:-1, z: 1}, {x:1, y:-1, z: 0}, {x:1, y:-1, z:-1}
     ],
-    'B': [ // Back Face (z=-1) -> Rows are Top(y=1) to Bottom(y=-1)
+    'B': [ // Back (Standard)
         {x:1, y: 1, z:-1}, {x:0, y: 1, z:-1}, {x:-1, y: 1, z:-1},
         {x:1, y: 0, z:-1}, {x:0, y: 0, z:-1}, {x:-1, y: 0, z:-1},
         {x:1, y:-1, z:-1}, {x:0, y:-1, z:-1}, {x:-1, y:-1, z:-1}
     ],
-    'L': [ // Left Face (x=-1) -> Rows are Top(y=1) to Bottom(y=-1)
+    'L': [ // Left (Standard)
         {x:-1, y: 1, z:-1}, {x:-1, y: 1, z: 0}, {x:-1, y: 1, z: 1},
         {x:-1, y: 0, z:-1}, {x:-1, y: 0, z: 0}, {x:-1, y: 0, z: 1},
         {x:-1, y:-1, z:-1}, {x:-1, y:-1, z: 0}, {x:-1, y:-1, z: 1}
     ],
-    /* USE THIS ONLY IF THE ABOVE IS SIDEWAYS */
-    'D': [ // Bottom Face (y=-1) -> FIXED MAPPING
-        // Row 1 (Top of Camera): Back Edge (z=-1)
-        {x:-1, y:-1, z:-1}, {x:0, y:-1, z:-1}, {x:1, y:-1, z:-1},
-        
-        // Row 2 (Middle of Camera): Middle (z=0)
-        {x:-1, y:-1, z: 0}, {x:0, y:-1, z: 0}, {x:1, y:-1, z: 0},
-        
-        // Row 3 (Bottom of Camera): Front Edge (z=1)
-        {x:-1, y:-1, z: 1}, {x:0, y:-1, z: 1}, {x:1, y:-1, z: 1}
+    'D': [ // Bottom (Fixed: Back-to-Front order to prevent mixing)
+        {x:-1, y:-1, z:-1}, {x:0, y:-1, z:-1}, {x:1, y:-1, z:-1}, // Row 1: Back Edge
+        {x:-1, y:-1, z: 0}, {x:0, y:-1, z: 0}, {x:1, y:-1, z: 0}, // Row 2: Center
+        {x:-1, y:-1, z: 1}, {x:0, y:-1, z: 1}, {x:1, y:-1, z: 1}  // Row 3: Front Edge
     ]
 };
 
+// 2. Scan Order Helper
+const SCAN_FACE_ORDER = ['U', 'F', 'R', 'B', 'L', 'D'];
+
 
 function processScannedData() {
-    // 1. Reset 3D Cube Orientation to default (0,0,0) so coordinates match the map
-    pivotGroup.rotation.set(0, 0, 0);
+    // A. RESET: Force cube to standard alignment (White Top, Green Front) 
+    // This guarantees our map coordinates are correct.
+    pivotGroup.rotation.set(0, 0, 0); 
     pivotGroup.updateMatrixWorld();
-    snapToGrid(); // Ensure sub-cubes are integer aligned
+    snapToGrid(); 
 
-    // 2. Loop through the 6 scanned faces (0 to 5)
+    // B. PAINT: Apply colors using the static map
     for (let i = 0; i < 6; i++) {
-        const faceColors = scannedFacesData[i]; // Array of 9 colors ['U','R'...]
-        const faceInfo = SCAN_FACE_ORDER[i];    // Get logical face (e.g., 'U')
-        const coordMap = GRID_TO_CUBE_MAP[faceInfo.code]; // Get the 9 coordinates
-        
-        // 3. Loop through the 9 stickers of this face
-        for (let stickerIdx = 0; stickerIdx < 9; stickerIdx++) {
-            // Get the color we scanned
-            const scannedColorChar = faceColors[stickerIdx]; 
-            const hexColor = colors[scannedColorChar];
+        const faceChar = SCAN_FACE_ORDER[i];
+        const faceColors = scannedFacesData[i]; // The 9 colors for this face
+        const coordMap = GRID_TO_CUBE_MAP[faceChar];
 
-            // Get the specific sub-cube at this coordinate
-            const targetPos = coordMap[stickerIdx];
-            const cube = findCubeAt(targetPos.x, targetPos.y, targetPos.z);
+        // Normal vectors to find the correct sticker on the sub-cube
+        let norm;
+        if(faceChar === 'U') norm = {x:0, y:1, z:0};
+        if(faceChar === 'D') norm = {x:0, y:-1, z:0};
+        if(faceChar === 'F') norm = {x:0, y:0, z:1};
+        if(faceChar === 'B') norm = {x:0, y:0, z:-1};
+        if(faceChar === 'R') norm = {x:1, y:0, z:0};
+        if(faceChar === 'L') norm = {x:-1, y:0, z:0};
+
+        for (let j = 0; j < 9; j++) {
+            const hex = colors[faceColors[j]];
+            const pos = coordMap[j];
+            
+            // Find the sub-cube at this logic position
+            const cube = cubes.find(c => 
+                Math.round(c.position.x) === pos.x && 
+                Math.round(c.position.y) === pos.y && 
+                Math.round(c.position.z) === pos.z
+            );
 
             if (cube) {
-                // Find the material index that faces our specific direction
-                const matIdx = getMaterialIndexForNormal(faceInfo.normal);
-                
-                // Paint it!
-                cube.material[matIdx].color.setHex(hexColor);
-                cube.material[matIdx].needsUpdate = true;
+                // Find the material index facing the correct direction
+                const matIdx = getMaterialIndexForNormal(norm);
+                if (matIdx !== -1) {
+                    cube.material[matIdx].color.setHex(hex);
+                    cube.material[matIdx].needsUpdate = true;
+                }
             }
         }
     }
 
-    // 4. Update UI and trigger solver
-    statusEl.innerText = "Scan Mapped! Solving...";
+    // C. ROTATE: Apply user preference
+    // "Last scanned (Bottom) becomes Front, 5th scanned (Left) becomes Top"
+    // Rotate X -90 deg (Bottom comes to Front)
+    // Rotate Z -90 deg (Left comes to Top)
+    pivotGroup.rotation.set(-Math.PI/2, 0, -Math.PI/2);
+    pivotGroup.updateMatrixWorld();
+
+    // D. FINISH
+    statusEl.innerText = "Scan Complete!";
     updatePaletteCounts();
     solveCube();
 }
@@ -749,7 +758,6 @@ function getMaterialIndexForNormal(norm) {
     if (norm.z === -1) return 5; // Back
     return -1;
 }
-
 
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
