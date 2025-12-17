@@ -625,15 +625,16 @@ function captureFace() {
 }
 
 // --- HELPER: Get Standard Normal Vector for a Face ID ---
-function getFaceVector(faceId) {
-    switch(faceId) {
-        case "face-0": return new THREE.Vector3(0, 0, 1);  // Front
-        case "face-1": return new THREE.Vector3(0, 1, 0);  // Top
-        case "face-2": return new THREE.Vector3(1, 0, 0);  // Right
-        case "face-3": return new THREE.Vector3(0, 0, -1); // Back
-        case "face-4": return new THREE.Vector3(-1, 0, 0); // Left
-        case "face-5": return new THREE.Vector3(0, -1, 0); // Bottom
-        default: return new THREE.Vector3(0, 0, 1);
+// --- HELPER: Get Logical Normal Vector for a Color Key ---
+function getNormalForColor(colorKey) {
+    switch(colorKey) {
+        case 'U': return new THREE.Vector3(0, 1, 0);  // White -> Top
+        case 'D': return new THREE.Vector3(0, -1, 0); // Yellow -> Bottom
+        case 'F': return new THREE.Vector3(0, 0, 1);  // Green -> Front
+        case 'B': return new THREE.Vector3(0, 0, -1); // Blue -> Back
+        case 'R': return new THREE.Vector3(1, 0, 0);  // Red -> Right
+        case 'L': return new THREE.Vector3(-1, 0, 0); // Orange -> Left
+        default: return new THREE.Vector3(0, 1, 0);
     }
 }
 
@@ -652,6 +653,7 @@ function processScannedData() {
         return;
     }
 
+    // 1. Map Colors to the 3D Model (Standard Solved Structure)
     ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
         const faceData = centerMap[faceKey];
         if(!faceData) return;
@@ -673,25 +675,27 @@ function processScannedData() {
         }
     });
 
-    // --- DYNAMIC ORIENTATION FIX ---
-    // 1. Identify which spatial faces were scanned last (6th) and 2nd last (5th)
-    const lastScanStep = SCAN_ORDER[SCAN_ORDER.length - 1];     // 6th Face -> Should be FRONT
-    const secondLastScanStep = SCAN_ORDER[SCAN_ORDER.length - 2]; // 5th Face -> Should be TOP
+    // --- DYNAMIC ORIENTATION FIX (COLOR BASED) ---
+    // 1. Find the Center Color of the Last Scanned Face (Face 6)
+    const lastScanData = scannedFacesData[scannedFacesData.length - 1];
+    const lastCenterColor = lastScanData[4]; // The center sticker color (e.g., 'R', 'D', 'U')
 
-    // 2. Get their standard normal vectors (e.g., Bottom is 0,-1,0; Left is -1,0,0)
-    const targetFrontVec = getFaceVector(lastScanStep.id);
-    const targetTopVec = getFaceVector(secondLastScanStep.id);
+    // 2. Find the Center Color of the 5th Scanned Face
+    const secondLastScanData = scannedFacesData[scannedFacesData.length - 2];
+    const secondLastCenterColor = secondLastScanData[4];
 
-    // 3. Construct a Rotation Matrix to align these vectors to World Front (Z+) and World Top (Y+)
-    // We create a basis matrix where Z=targetFront, Y=targetTop, X=Cross(Y, Z)
+    // 3. Get the logical vectors for these colors
+    // Example: If last was Red, we want the Red Face (Vector 1,0,0) to face Camera (0,0,1)
+    const targetFrontVec = getNormalForColor(lastCenterColor); 
+    const targetTopVec = getNormalForColor(secondLastCenterColor);
+
+    // 4. Construct Rotation Matrix to align these colored faces to Camera Front/Top
     const targetRightVec = new THREE.Vector3().crossVectors(targetTopVec, targetFrontVec);
     const orientationMatrix = new THREE.Matrix4().makeBasis(targetRightVec, targetTopVec, targetFrontVec);
-
-    // 4. Invert the matrix to find the rotation needed to bring them TO the standard View
     const invMatrix = orientationMatrix.invert();
 
-    // 5. Apply to Pivot Group
-    pivotGroup.rotation.set(0, 0, 0); // Reset first
+    // 5. Apply Rotation
+    pivotGroup.rotation.set(0, 0, 0); 
     pivotGroup.updateMatrixWorld();
     pivotGroup.quaternion.setFromRotationMatrix(invMatrix);
 
