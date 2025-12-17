@@ -697,28 +697,44 @@ function getCubesForFace(face) {
 // This ensures colors land on the 3D cube EXACTLY as they appear in the camera grid
 // Ensure the 3D mapping knows this specific 'Front -> Top' orientation for accurate colors
 // --- FIX: EXACT ORIENTATION MAPPING (INVERTED 180°) ---
+/* =========================================================
+   FIX: STANDARD GEOMETRIC MAPPING (1:1 with Camera)
+   =========================================================
+   This maps the camera grid (Top-Left -> Bottom-Right) 
+   directly to the physical Top-Left -> Bottom-Right of each face.
+   
+   Assumption: When scanning a face, you hold the cube such that 
+   that face is "Upright" (e.g., White is effectively on Top).
+*/
+
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): 180° Inversion from previous (Z Descending, X Ascending)
-        if(face === 'U') return (bz - az) || (ax - bx);
+        // U (Top): Rows = Z (Back->Front), Cols = X (Left->Right)
+        // Logic: Lowest Z is Top-Row. Lowest X is Left-Col.
+        if(face === 'U') return (az - bz) || (ax - bx);
         
-        // F (Front): PERFECT (Kept: X Descending, Y Descending)
-        if(face === 'F') return (bx - ax) || (by - ay);
+        // F (Front): Rows = Y (Top->Bottom), Cols = X (Left->Right)
+        // Logic: Highest Y is Top-Row. Lowest X is Left-Col.
+        if(face === 'F') return (by - ay) || (ax - bx);
         
-        // R (Right): 90° Anti-Clockwise from previous (Y Descending, Z Ascending)
-        if(face === 'R') return (by - ay) || (az - bz);
+        // R (Right): Rows = Y (Top->Bottom), Cols = Z (Front->Back)
+        // Logic: Highest Y is Top-Row. Highest Z is Left-Col (closest to Front).
+        if(face === 'R') return (by - ay) || (bz - az);
         
-        // B (Back): 180° Rotation from previous (X Descending, Y Ascending)
-        if(face === 'B') return (bx - ax) || (ay - by);
+        // B (Back): Rows = Y (Top->Bottom), Cols = X (Right->Left)
+        // Logic: Highest Y is Top-Row. Highest X is Left-Col (viewed from back).
+        if(face === 'B') return (by - ay) || (bx - ax);
         
-        // L (Left): PERFECT (Kept: Z Descending, Y Descending)
-        if(face === 'L') return (bz - az) || (by - ay);
+        // L (Left): Rows = Y (Top->Bottom), Cols = Z (Back->Front)
+        // Logic: Highest Y is Top-Row. Lowest Z is Left-Col (closest to Back).
+        if(face === 'L') return (by - ay) || (az - bz);
         
-        // D (Bottom): 90° Clockwise from previous (X Ascending, Z Ascending)
-        if(face === 'D') return (ax - bx) || (az - bz);
+        // D (Bottom): Rows = Z (Front->Back), Cols = X (Left->Right)
+        // Logic: Highest Z is Top-Row (closest to Front). Lowest X is Left-Col.
+        if(face === 'D') return (bz - az) || (ax - bx);
     });
 }
 
