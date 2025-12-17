@@ -624,6 +624,19 @@ function captureFace() {
     }
 }
 
+// --- HELPER: Get Standard Normal Vector for a Face ID ---
+function getFaceVector(faceId) {
+    switch(faceId) {
+        case "face-0": return new THREE.Vector3(0, 0, 1);  // Front
+        case "face-1": return new THREE.Vector3(0, 1, 0);  // Top
+        case "face-2": return new THREE.Vector3(1, 0, 0);  // Right
+        case "face-3": return new THREE.Vector3(0, 0, -1); // Back
+        case "face-4": return new THREE.Vector3(-1, 0, 0); // Left
+        case "face-5": return new THREE.Vector3(0, -1, 0); // Bottom
+        default: return new THREE.Vector3(0, 0, 1);
+    }
+}
+
 function processScannedData() {
     const centerMap = {}; 
     const centersFound = [];
@@ -643,8 +656,6 @@ function processScannedData() {
         const faceData = centerMap[faceKey];
         if(!faceData) return;
         let targetCubes = getCubesForFace(faceKey);
-        
-        // Use the Correct Sorting Function
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
         const colorsArr = faceData.colors;
@@ -662,16 +673,27 @@ function processScannedData() {
         }
     });
 
-    // --- FINAL ORIENTATION FIX (WORLD AXIS) ---
-    // 1. Reset to standard alignment
-    pivotGroup.rotation.set(0, 0, 0);
+    // --- DYNAMIC ORIENTATION FIX ---
+    // 1. Identify which spatial faces were scanned last (6th) and 2nd last (5th)
+    const lastScanStep = SCAN_ORDER[SCAN_ORDER.length - 1];     // 6th Face -> Should be FRONT
+    const secondLastScanStep = SCAN_ORDER[SCAN_ORDER.length - 2]; // 5th Face -> Should be TOP
+
+    // 2. Get their standard normal vectors (e.g., Bottom is 0,-1,0; Left is -1,0,0)
+    const targetFrontVec = getFaceVector(lastScanStep.id);
+    const targetTopVec = getFaceVector(secondLastScanStep.id);
+
+    // 3. Construct a Rotation Matrix to align these vectors to World Front (Z+) and World Top (Y+)
+    // We create a basis matrix where Z=targetFront, Y=targetTop, X=Cross(Y, Z)
+    const targetRightVec = new THREE.Vector3().crossVectors(targetTopVec, targetFrontVec);
+    const orientationMatrix = new THREE.Matrix4().makeBasis(targetRightVec, targetTopVec, targetFrontVec);
+
+    // 4. Invert the matrix to find the rotation needed to bring them TO the standard View
+    const invMatrix = orientationMatrix.invert();
+
+    // 5. Apply to Pivot Group
+    pivotGroup.rotation.set(0, 0, 0); // Reset first
     pivotGroup.updateMatrixWorld();
-    
-    // 2. Rotate X by -90: brings Bottom (Y-) to Front (Z+)
-    pivotGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-    
-    // 3. Rotate Z by -90: brings Left (X-) to Top (Y+)
-    pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -Math.PI / 2);
+    pivotGroup.quaternion.setFromRotationMatrix(invMatrix);
 
     statusEl.innerText = "Scan Mapped! Solving...";
     runLogicalAutofill(false); 
