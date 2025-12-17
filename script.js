@@ -1,3 +1,4 @@
+
 /* =========================================================
    RUBIK'S CUBE SOLVER – VISUAL GUIDE (ORIENTATION FIXED)
    ========================================================= */
@@ -659,7 +660,7 @@ function processScannedData() {
         if(!faceData) return;
         let targetCubes = getCubesForFace(faceKey);
         
-        // Use the sorting logic that matches your "Twist" scan
+        // Use the updated Sort Logic
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
         const colorsArr = faceData.colors;
@@ -677,36 +678,40 @@ function processScannedData() {
         }
     });
 
-    // --- ORIENTATION CORRECTION ---
-    // 1. Get Vectors for Last (Front) and 2nd Last (Top) faces
+    // --- DYNAMIC ORIENTATION FIX (ROBUST) ---
+    // 1. Get the Color of the Last Scanned Face (Face 6)
     const lastScanData = scannedFacesData[5]; 
-    const secondLastScanData = scannedFacesData[4];
-    
-    const vecFront = getNormalForColor(lastScanData[4]); 
-    const vecTop   = getNormalForColor(secondLastScanData[4]); 
+    const lastCenterColor = lastScanData[4]; 
 
-    // 2. Create Basis Matrix
+    // 2. Get the Color of the 5th Scanned Face (Face 5)
+    const secondLastScanData = scannedFacesData[4];
+    const secondLastCenterColor = secondLastScanData[4];
+
+    // 3. Get the Vectors where these faces physically live on a solved cube
+    const vecFront = getNormalForColor(lastCenterColor); // e.g., Yellow (0,-1,0)
+    const vecTop   = getNormalForColor(secondLastCenterColor); // e.g., Orange (-1,0,0)
+
+    // 4. Create a Basis Matrix that matches the Camera View
+    // Camera View requires: Front Axis (Z), Top Axis (Y), Right Axis (X)
     const vecRight = new THREE.Vector3().crossVectors(vecTop, vecFront).normalize();
+    
+    // Create matrix where columns are Right, Top, Front
     const m = new THREE.Matrix4();
     m.makeBasis(vecRight, vecTop, vecFront);
     
-    // 3. Apply Base Orientation
+    // 5. Apply the INVERSE of this matrix to the pivot group
+    // This rotates the world so that vecFront becomes Z+ and vecTop becomes Y+
     const invM = m.invert();
+    
     pivotGroup.rotation.set(0, 0, 0);
     pivotGroup.updateMatrixWorld();
     pivotGroup.quaternion.setFromRotationMatrix(invM);
-    
-    // 4. APPLY USER CORRECTIONS ("Front +90deg", "Top 180 off")
-    // We rotate the geometry relative to the camera view
-    pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -Math.PI / 2); // Fix "Front +90" twist
-    pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), Math.PI);      // Fix "Top 180 off" flip
 
     statusEl.innerText = "Scan Mapped! Solving...";
     runLogicalAutofill(false); 
     updatePaletteCounts();
     solveCube();
 }
-
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
     if(face === 'D') return new THREE.Vector3(0,-1,0);
@@ -1131,35 +1136,12 @@ function onInputStart(e) {
 }
 function onInputMove(e) {
     if (!isMouseDown) return;
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const cy = e.touches ? e.touches[0].clientY : e.clientY;
-    
-    const dx = cx - lastMouse.x;
-    const dy = cy - lastMouse.y;
-
+    const cx = e.touches ? e.touches[0].clientX : e.clientX, cy = e.touches ? e.touches[0].clientY : e.clientY;
+    const dx = cx - lastMouse.x, dy = cy - lastMouse.y;
     if (Math.abs(cx - startMouse.x) > 5 || Math.abs(cy - startMouse.y) > 5) isDragging = true;
-
-    if (isDragging) {
-        // ROTATION FIX: Rotate around WORLD axes, not local axes
-        // dx (horizontal move) -> Rotate around World Y (Vertical Axis)
-        // dy (vertical move)   -> Rotate around World X (Horizontal Axis)
-        
-        const moveSpeed = 0.006;
-        
-        // World Y Axis (0, 1, 0)
-        pivotGroup.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), dx * moveSpeed);
-        
-        // World X Axis (1, 0, 0)
-        pivotGroup.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), dy * moveSpeed);
-
-        if(solutionMoves.length > 0) {
-            updateDisplayMoves();
-            updateStepStatus();
-        }
-    }
+    if (isDragging) { pivotGroup.rotation.y += dx * 0.006; pivotGroup.rotation.x += dy * 0.006; if(solutionMoves.length > 0) { updateDisplayMoves(); updateStepStatus(); } }
     lastMouse = { x: cx, y: cy };
 }
-
 function onInputEnd(e) {
     isMouseDown = false;
     if (!isDragging) {
