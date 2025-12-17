@@ -630,56 +630,92 @@ function captureFace() {
 
 // Standard Cube Topology (Who is where?)
 // Format: [Top, Right, Bottom, Left] neighbors for each face
-const NEIGHBOR_MAP = {
-    U: ['B', 'R', 'F', 'L'], // White's neighbors
+/* =========================================================
+   STEP 2: SMART AUTO-ORIENTATION SOLVER
+   ========================================================= */
+
+// 1. The "Truth" of a Solved Cube (Neighbor Order: [Top, Right, Bottom, Left])
+// This defines which face is where relative to the center, assuming the face is upright.
+const CUBE_TOPOLOGY = {
+    U: ['B', 'R', 'F', 'L'], // White's neighbors: Blue(N), Red(E), Green(S), Orange(W)
     F: ['U', 'R', 'D', 'L'], // Green's neighbors
     R: ['U', 'B', 'D', 'F'], // Red's neighbors
     B: ['U', 'L', 'D', 'R'], // Blue's neighbors
     L: ['U', 'F', 'D', 'B'], // Orange's neighbors
-    D: ['F', 'R', 'B', 'L']  // Yellow's neighbors
+    D: ['F', 'R', 'B', 'L']  // Yellow's neighbors: Front, Right, Back, Left
+};
+
+// 2. The "Scanner Reality"
+// When you hold the camera, which Scan Index is at the "Bottom" of the current view?
+const SCAN_SCREEN_BOTTOM = {
+    0: 1, // Scan 0 (Top): Bottom edge touches Scan 1 (Front)
+    1: 5, // Scan 1 (Front): Bottom edge touches Scan 5 (Bottom)
+    2: 5, // Scan 2 (Right): Bottom edge touches Scan 5 (Bottom)
+    3: 5, // Scan 3 (Back): Bottom edge touches Scan 5 (Bottom)
+    4: 5, // Scan 4 (Left): Bottom edge touches Scan 5 (Bottom)
+    5: 3  // Scan 5 (Bottom): Bottom edge touches Scan 3 (Back) 
+          // (Because you tilted UP from Left, putting Back at the bottom of screen)
 };
 
 function processScannedData() {
-    const centerMap = {}; 
-    const centersFound = [];
+    // A. Extract all 6 center colors to identify the user's orientation
+    const centers = scannedFacesData.map(f => f[4]);
     
-    // Map data and track the original scan index (0 to 5)
-    scannedFacesData.forEach((faceData, idx) => {
-        const centerColor = faceData[4]; 
-        centerMap[centerColor] = { colors: faceData, originalIdx: idx };
-        centersFound.push(centerColor);
-    });
-
-    const unique = new Set(centersFound);
-    if(unique.size !== 6) {
-        alert("Scan Error: Duplicate centers detected. Please rescan.");
+    // Check for duplicates
+    if(new Set(centers).size !== 6) {
+        alert("Scan Error: Duplicate centers. Please Scan Again.");
         return;
     }
+
+    // B. Calculate Rotation for EACH face separately
+    const processedData = scannedFacesData.map((faceColors, scanIdx) => {
+        const myCenter = faceColors[4];
+        
+        // 1. Who is physically at the "Bottom" of my camera screen?
+        const neighborIdx = SCAN_SCREEN_BOTTOM[scanIdx];
+        const actualNeighborColor = centers[neighborIdx];
+        
+        // 2. Where DOES the Standard Cube say that neighbor belongs?
+        // We look up myCenter in the Topology map.
+        const validNeighbors = CUBE_TOPOLOGY[myCenter];
+        const standardPos = validNeighbors.indexOf(actualNeighborColor);
+        
+        // If the neighbor isn't found (impossible on real cube), return raw data
+        if (standardPos === -1) return faceColors;
+
+        // 3. Calculate Rotation
+        // In Topology, 'Bottom' is index 2.
+        // If standardPos is 2, we are aligned (Rotation 0).
+        // If standardPos is 3 (Left), we are rotated 90 deg, etc.
+        // Formula: (TargetIndex - CurrentIndex + 4) % 4
+        // We want neighbor at Bottom (Index 2). It is currently at 'standardPos'.
+        // Wait, logic is reverse: We have the neighbor at Bottom (2) on SCREEN.
+        // We need to rotate the PIXELS so that 'standardPos' moves to Index 2.
+        const rotationNeeded = (2 - standardPos + 4) % 4;
+
+        // 4. Apply Rotation
+        return rotateFaceArray(faceColors, rotationNeeded);
+    });
+
+    // C. Paint the Cube using the corrected data
+    const centerMap = {};
+    processedData.forEach((data, i) => centerMap[data[4]] = data);
 
     ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
         const faceData = centerMap[faceKey];
         if(!faceData) return;
         
         let targetCubes = getCubesForFace(faceKey);
-        // Use your working sort function
         targetCubes = sortCubesForGrid(targetCubes, faceKey);
         
-        let colorsArr = [...faceData.colors];
-
-        // --- FIX: ROTATE ONLY THE LAST SCANNED FACE ---
-        // If this is the 6th face scanned (Index 5), rotate pixels 90° Anti-Clockwise
-        if (faceData.originalIdx === 5) {
-            colorsArr = rotateAntiClockwise(colorsArr);
-        }
-
         for(let i=0; i<9; i++) {
             const c = targetCubes[i];
             if(!c.userData.isCenter) {
-                const colorCode = colorsArr[i];
+                const hex = colors[faceData[i]];
                 const norm = getFaceNormal(faceKey);
                 const matIdx = getVisibleFaceMatIndex(c, norm);
                 if(matIdx !== -1) {
-                    c.material[matIdx].color.setHex(colors[colorCode]);
+                    c.material[matIdx].color.setHex(hex);
                     c.material[matIdx].needsUpdate = true;
                 }
             }
@@ -692,24 +728,7 @@ function processScannedData() {
     solveCube();
 }
 
-// Helper: Rotates the 3x3 array 90 degrees Anti-Clockwise
-// [0,1,2]       [2,5,8]
-// [3,4,5]  -->  [1,4,7]
-// [6,7,8]       [0,3,6]
-function rotateAntiClockwise(arr) {
-    const newArr = new Array(9);
-    newArr[0] = arr[2];
-    newArr[1] = arr[5];
-    newArr[2] = arr[8];
-    newArr[3] = arr[1];
-    newArr[4] = arr[4];
-    newArr[5] = arr[7];
-    newArr[6] = arr[0];
-    newArr[7] = arr[3];
-    newArr[8] = arr[6];
-    return newArr;
-}
-// Helper: Rotate a 1D array of 9 elements (representing 3x3 grid) clockwise
+// Helper: Rotate array 90 degrees Clockwise 'times' times
 function rotateFaceArray(arr, times) {
     let res = [...arr];
     for(let t=0; t<times; t++) {
@@ -723,6 +742,7 @@ function rotateFaceArray(arr, times) {
     }
     return res;
 }
+
 
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
@@ -765,6 +785,7 @@ function getCubesForFace(face) {
 
 // PART 1: STANDARD MAPPING (Do not change this again)
 // This maps the camera grid 1:1 to the cube face.
+// --- STEP 1: STANDARD GEOMETRIC MAPPING (1:1 Physics) ---
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
@@ -784,7 +805,6 @@ function sortCubesForGrid(list, face) {
         if(face === 'D') return (bz - az) || (ax - bx);
     });
 }
-
 
 
 function getColorKey(hex) {
