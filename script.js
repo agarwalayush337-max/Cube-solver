@@ -462,13 +462,14 @@ function stopCameraMode() {
 // SEQUENCE: Front -> Top -> Right -> Back -> Left -> Bottom
 // This matches the video: Tilt Down, then Rotate Right, Right, Right, then Tilt to Bottom.
 // SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom (From Left)
+// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom
 const SCAN_ORDER = [
     { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" },                     // 1. Start Top
     { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },                       // 2. Rotate to Front
     { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" },                     // 3. Rotate to Right
     { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },                    // 4. Rotate to Back
     { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },                    // 5. Rotate to Left
-    { name: "BOTTOM",id: "face-5", rot: "rotateZ(90deg)" }      // 6. Rotate Up from Left to Bottom
+    { name: "BOTTOM",id: "face-5", rot: "rotateZ(90deg) rotateX(90deg)" }        // 6. Twist Z & Flip X to Bottom
 ];
 
 function updateCamInstruction() {
@@ -498,7 +499,7 @@ function updateCamInstruction() {
     }
     else if(scanIndex === 5) { 
         camMsg.innerText = "6. Rotate UP -> Scan BOTTOM"; 
-        camSubMsg.innerText = "Tilt cube up (from Left) to see Bottom (Yellow)"; 
+        camSubMsg.innerText = "From Left, Tilt cube UP to see Bottom (Yellow)"; 
     }
 }
 
@@ -700,28 +701,27 @@ function sortCubesForGrid(list, face) {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): Standard mapping (Back->Front, Left->Right)
+        // U (Top): Standard mapping
         if(face === 'U') return (az - bz) || (ax - bx);
         
-        // F (Front): Standard mapping (Top->Bottom, Left->Right)
+        // F (Front): Standard mapping
         if(face === 'F') return (by - ay) || (ax - bx);
         
-        // R (Right): Standard mapping (Top->Bottom, Front->Back)
+        // R (Right): Standard mapping
         if(face === 'R') return (by - ay) || (bz - az);
         
-        // B (Back): Standard mapping (Top->Bottom, Right->Left)
+        // B (Back): Standard mapping
         if(face === 'B') return (by - ay) || (bx - ax);
         
-        // L (Left): Standard mapping (Top->Bottom, Back->Front)
+        // L (Left): Standard mapping
         if(face === 'L') return (by - ay) || (az - bz);
         
-        // D (Bottom) - Mapped for "Rotate Up from Left"
-        // Screen Top=LeftEdge(x=-1), Bottom=RightEdge(x=1)
-        // Screen Left=BackEdge(z=-1), Right=FrontEdge(z=1)
+        // D (Bottom) - Corrected for "rotateZ(90deg) rotateX(90deg)"
+        // Screen Y (Rows) maps to Cube X (Left->Right)
+        // Screen X (Cols) maps to Cube Z (Back->Front)
         if(face === 'D') return (ax - bx) || (az - bz);
     });
 }
-
 
 function getColorKey(hex) {
     for (const k in colors) { if (k !== "Core" && colors[k] === hex) return k; }
