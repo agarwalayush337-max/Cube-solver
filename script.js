@@ -636,70 +636,86 @@ function captureFace() {
 
 // 1. The "Truth" of a Solved Cube (Neighbor Order: [Top, Right, Bottom, Left])
 // This defines which face is where relative to the center, assuming the face is upright.
-const CUBE_TOPOLOGY = {
-    U: ['B', 'R', 'F', 'L'], // White's neighbors: Blue(N), Red(E), Green(S), Orange(W)
-    F: ['U', 'R', 'D', 'L'], // Green's neighbors
-    R: ['U', 'B', 'D', 'F'], // Red's neighbors
-    B: ['U', 'L', 'D', 'R'], // Blue's neighbors
-    L: ['U', 'F', 'D', 'B'], // Orange's neighbors
-    D: ['F', 'R', 'B', 'L']  // Yellow's neighbors: Front, Right, Back, Left
-};
+/* =========================================================
+   STEP 2: CHAIN-LINK AUTO-ORIENTATION
+   ========================================================= */
 
-// 2. The "Scanner Reality"
-// When you hold the camera, which Scan Index is at the "Bottom" of the current view?
-const SCAN_SCREEN_BOTTOM = {
-    0: 1, // Scan 0 (Top): Bottom edge touches Scan 1 (Front)
-    1: 5, // Scan 1 (Front): Bottom edge touches Scan 5 (Bottom)
-    2: 5, // Scan 2 (Right): Bottom edge touches Scan 5 (Bottom)
-    3: 5, // Scan 3 (Back): Bottom edge touches Scan 5 (Bottom)
-    4: 5, // Scan 4 (Left): Bottom edge touches Scan 5 (Bottom)
-    5: 3  // Scan 5 (Bottom): Bottom edge touches Scan 3 (Back) 
-          // (Because you tilted UP from Left, putting Back at the bottom of screen)
+// 1. The Standard Neighbors of every color (Solved State)
+// Order: [Top, Right, Bottom, Left]
+const CUBE_TOPOLOGY = {
+    U: ['B', 'R', 'F', 'L'], 
+    F: ['U', 'R', 'D', 'L'], 
+    R: ['U', 'B', 'D', 'F'], 
+    B: ['U', 'L', 'D', 'R'], 
+    L: ['U', 'F', 'D', 'B'], 
+    D: ['F', 'R', 'B', 'L']  
 };
 
 function processScannedData() {
-    // A. Extract all 6 center colors to identify the user's orientation
     const centers = scannedFacesData.map(f => f[4]);
     
-    // Check for duplicates
+    // Safety check
     if(new Set(centers).size !== 6) {
         alert("Scan Error: Duplicate centers. Please Scan Again.");
         return;
     }
 
-    // B. Calculate Rotation for EACH face separately
     const processedData = scannedFacesData.map((faceColors, scanIdx) => {
         const myCenter = faceColors[4];
-        
-        // 1. Who is physically at the "Bottom" of my camera screen?
-        const neighborIdx = SCAN_SCREEN_BOTTOM[scanIdx];
-        const actualNeighborColor = centers[neighborIdx];
-        
-        // 2. Where DOES the Standard Cube say that neighbor belongs?
-        // We look up myCenter in the Topology map.
-        const validNeighbors = CUBE_TOPOLOGY[myCenter];
-        const standardPos = validNeighbors.indexOf(actualNeighborColor);
-        
-        // If the neighbor isn't found (impossible on real cube), return raw data
-        if (standardPos === -1) return faceColors;
+        let refNeighborColor, refNeighborPosOnScreen;
 
-        // 3. Calculate Rotation
-        // In Topology, 'Bottom' is index 2.
-        // If standardPos is 2, we are aligned (Rotation 0).
-        // If standardPos is 3 (Left), we are rotated 90 deg, etc.
-        // Formula: (TargetIndex - CurrentIndex + 4) % 4
-        // We want neighbor at Bottom (Index 2). It is currently at 'standardPos'.
-        // Wait, logic is reverse: We have the neighbor at Bottom (2) on SCREEN.
-        // We need to rotate the PIXELS so that 'standardPos' moves to Index 2.
-        const rotationNeeded = (2 - standardPos + 4) % 4;
+        // --- THE CHAIN LINK LOGIC ---
+        // We define ONE fixed anchor point for every scan based on the user's movement.
+        
+        if (scanIdx === 0) { 
+            // Scan 0 (Top): The User will next scan Face 1 (Front).
+            // Physically, Face 1 is at the BOTTOM edge of Face 0.
+            refNeighborColor = centers[1];
+            refNeighborPosOnScreen = 2; // 0=Top, 1=Right, 2=Bottom, 3=Left
+        } 
+        else if (scanIdx === 1) {
+            // Scan 1 (Front): The User just came from Face 0 (Top).
+            // Physically, Face 0 is at the TOP edge of Face 1.
+            refNeighborColor = centers[0];
+            refNeighborPosOnScreen = 0; // Top
+        }
+        else if (scanIdx >= 2 && scanIdx <= 4) {
+            // Scan 2, 3, 4 (Sides): User rotated RIGHT to get here.
+            // So the PREVIOUS face is on the LEFT edge.
+            refNeighborColor = centers[scanIdx - 1];
+            refNeighborPosOnScreen = 3; // Left
+        }
+        else if (scanIdx === 5) {
+            // Scan 5 (Bottom): User tilted UP from Face 4 (Left).
+            // Physically, Face 4 is at the TOP edge of Face 5.
+            refNeighborColor = centers[4];
+            refNeighborPosOnScreen = 0; // Top
+        }
 
-        // 4. Apply Rotation
+        // --- CALCULATE ROTATION ---
+        // 1. Find where the Standard Cube says this neighbor SHOULD be.
+        const standardNeighbors = CUBE_TOPOLOGY[myCenter];
+        const standardPos = standardNeighbors.indexOf(refNeighborColor);
+
+        // 2. Rotate grid so Screen Position matches Standard Position
+        // Formula: (ScreenPos - StandardPos + 4) % 4
+        // Example: Neighbor is at Screen Top (0). Should be at Right (1).
+        // Rotation = (0 - 1 + 4) % 4 = 3 (Rotate 270 deg / 90 deg CCW)
+        
+        // Wait! If I have Neighbor at Screen Top (0), and it belongs at Right (1).
+        // I need to rotate my grid 90 degrees CLOCKWISE so that the "Top" pixels move to the "Right".
+        // Let's trace: 
+        // [N, x, x] (N at Top) -> Rotate 90 -> [x, x, N] (N at Right)
+        // So Rotation = (Target - Source + 4) % 4
+        
+        const rotationNeeded = (standardPos - refNeighborPosOnScreen + 4) % 4;
+
         return rotateFaceArray(faceColors, rotationNeeded);
     });
 
-    // C. Paint the Cube using the corrected data
+    // Paint the Cube
     const centerMap = {};
-    processedData.forEach((data, i) => centerMap[data[4]] = data);
+    processedData.forEach((data) => centerMap[data[4]] = data);
 
     ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
         const faceData = centerMap[faceKey];
@@ -726,6 +742,18 @@ function processScannedData() {
     runLogicalAutofill(false); 
     updatePaletteCounts();
     solveCube();
+}
+
+// Helper: Rotate array 90 degrees Clockwise
+function rotateFaceArray(arr, times) {
+    let res = [...arr];
+    for(let t=0; t<times; t++) {
+        const temp = [...res];
+        res[0]=temp[6]; res[1]=temp[3]; res[2]=temp[0];
+        res[3]=temp[7]; res[4]=temp[4]; res[5]=temp[1];
+        res[6]=temp[8]; res[7]=temp[5]; res[8]=temp[2];
+    }
+    return res;
 }
 
 // Helper: Rotate array 90 degrees Clockwise 'times' times
@@ -786,25 +814,30 @@ function getCubesForFace(face) {
 // PART 1: STANDARD MAPPING (Do not change this again)
 // This maps the camera grid 1:1 to the cube face.
 // --- STEP 1: STANDARD GEOMETRIC MAPPING (1:1 Physics) ---
+// STEP 1: STANDARD MAPPING (Physics Engine)
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): Back-Left -> Front-Right
+        // U (Top): Back-Row First (Z-Ascending), then Left-to-Right (X-Ascending)
         if(face === 'U') return (az - bz) || (ax - bx);
-        // F (Front): Top-Left -> Bottom-Right
+        // F (Front): Top-Row First (Y-Descending), then Left-to-Right (X-Ascending)
         if(face === 'F') return (by - ay) || (ax - bx);
-        // R (Right): Top-Front -> Bottom-Back
+        // R (Right): Top-Row First (Y-Descending), then Front-to-Back (Z-Descending)
+        // Note: On Right face, Z-Descending moves from Front edge to Back edge
         if(face === 'R') return (by - ay) || (bz - az);
-        // B (Back): Top-Right -> Bottom-Left
+        // B (Back): Top-Row First (Y-Descending), then Right-to-Left (X-Descending)
+        // Note: On Back face, X-Descending moves from Right edge to Left edge
         if(face === 'B') return (by - ay) || (bx - ax);
-        // L (Left): Top-Back -> Bottom-Front
+        // L (Left): Top-Row First (Y-Descending), then Back-to-Front (Z-Ascending)
+        // Note: On Left face, Z-Ascending moves from Back edge to Front edge
         if(face === 'L') return (by - ay) || (az - bz);
-        // D (Bottom): Front-Left -> Back-Right
+        // D (Bottom): Front-Row First (Z-Descending), then Left-to-Right (X-Ascending)
         if(face === 'D') return (bz - az) || (ax - bx);
     });
 }
+
 
 
 function getColorKey(hex) {
