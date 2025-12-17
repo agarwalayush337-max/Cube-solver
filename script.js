@@ -783,23 +783,33 @@ function getCubesForFace(face) {
 
 // PART 1: STANDARD MAPPING (Do not change this again)
 // This maps the camera grid 1:1 to the cube face.
+/* =========================================================
+   FINAL FIX: STANDARD + BOTTOM ROTATED 90° ACW
+   ========================================================= */
+
 function sortCubesForGrid(list, face) {
     return list.sort((a,b) => {
         const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
         const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
 
-        // U (Top): Back-Left -> Front-Right
+        // U (Top): Standard (Back-Left -> Front-Right)
         if(face === 'U') return (az - bz) || (ax - bx);
-        // F (Front): Top-Left -> Bottom-Right
+        
+        // F (Front): Standard (Top-Left -> Bottom-Right)
         if(face === 'F') return (by - ay) || (ax - bx);
-        // R (Right): Top-Front -> Bottom-Back
+        
+        // R (Right): Standard (Top-Front -> Bottom-Back)
         if(face === 'R') return (by - ay) || (bz - az);
-        // B (Back): Top-Right -> Bottom-Left
+        
+        // B (Back): Standard (Top-Right -> Bottom-Left)
         if(face === 'B') return (by - ay) || (bx - ax);
-        // L (Left): Top-Back -> Bottom-Front
+        
+        // L (Left): Standard (Top-Back -> Bottom-Front)
         if(face === 'L') return (by - ay) || (az - bz);
-        // D (Bottom): Front-Left -> Back-Right
-        if(face === 'D') return (bz - az) || (ax - bx);
+        
+        // D (Bottom): 90° Anti-Clockwise
+        // Logic: Sort X Descending (Right edge is Top), then Z Descending (Front is Left)
+        if(face === 'D') return (bx - ax) || (bz - az);
     });
 }
 
