@@ -1385,6 +1385,7 @@ var min2phase = (function() {
 			return new Search().solution(facelet);
 		},
 		randomCube: randomCube,
+		Search: Search, /* exposed so the worker can ask for shorter solutions */
 		fromScramble: fromScramble,
 		initFull: function() {
 			PARTIAL_INIT_LEVEL = 0;
