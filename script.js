@@ -201,8 +201,9 @@ guideStyle.innerHTML = `
     
     #grid-overlay {
         position: absolute;
-        width: min(70vw, 70vh);
-        height: min(70vw, 70vh);
+        width: min(66vw, 30vh);
+        height: min(66vw, 30vh);
+        margin-top: 2vh;
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
         grid-template-rows: 1fr 1fr 1fr;
@@ -456,6 +457,7 @@ async function startCameraMode() {
         liveCells = [];
         prevCells = null;
         stableFrames = 0;
+        autoArmed = true;
         clearHighlights();
         
         document.querySelectorAll('.p-sticker').forEach(s => s.style.backgroundColor = '#2a2a2a');
@@ -548,73 +550,15 @@ function processCameraFrame() {
     requestAnimationFrame(processCameraFrame);
 }
 
-/* Read the 9 stickers from the 300x300 crop of the guide square.
-   Each sticker is sampled on a 7x7 grid of points kept 20% away from
-   its edges (so the black plastic borders are ignored), and the
-   per-channel median is used so glare spots don't spoil the reading. */
-const STICKER_INSET = 0.2;
-const SAMPLES_PER_SIDE = 7;
-function sampleStickers(ctx2, size) {
-    const img = ctx2.getImageData(0, 0, size, size).data;
-    const cell = size / 3;
-    const cells = [];
-    for (let row = 0; row < 3; row++) {
-        for (let col = 0; col < 3; col++) {
-            const x0 = col * cell + cell * STICKER_INSET, x1 = (col + 1) * cell - cell * STICKER_INSET;
-            const y0 = row * cell + cell * STICKER_INSET, y1 = (row + 1) * cell - cell * STICKER_INSET;
-            const samples = [];
-            for (let i = 0; i < SAMPLES_PER_SIDE; i++) {
-                for (let j = 0; j < SAMPLES_PER_SIDE; j++) {
-                    const x = Math.round(x0 + (x1 - x0) * i / (SAMPLES_PER_SIDE - 1));
-                    const y = Math.round(y0 + (y1 - y0) * j / (SAMPLES_PER_SIDE - 1));
-                    const p = (y * size + x) * 4;
-                    samples.push([img[p], img[p + 1], img[p + 2]]);
-                }
-            }
-            cells.push(CubeLogic.medianRGB(samples));
-        }
-    }
-    liveLooksLikeCube = gridLooksLikeCube(img, size, cells);
-    return cells;
-}
-
-/* Does the guide square really contain a cube face? Real cubes have
-   dark plastic (or dark gaps) between stickers, so most of the 12 inner
-   borders must be clearly darker than the stickers on both sides.
-   This stops auto-capture from grabbing an empty background. */
+/* Read the 9 stickers from the 300x300 crop of the guide square
+   (see CubeLogic.analyzeFaceImage: 7x7 samples inset 20% from each
+   sticker's edges, median colour, plus a check that the square really
+   shows a cube face – stickered or stickerless). */
 let liveLooksLikeCube = false;
-function gridLooksLikeCube(img, size, cells) {
-    const lum = (x, y) => {
-        const p = (Math.round(y) * size + Math.round(x)) * 4;
-        return 0.299 * img[p] + 0.587 * img[p + 1] + 0.114 * img[p + 2];
-    };
-    const cellLum = cells.map(c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
-    if (Math.max(...cellLum) < 40) return false;            // too dark / lens covered
-    const cell = size / 3, reach = cell * 0.15;
-    let darkBorders = 0;
-    for (let line = 1; line <= 2; line++) {
-        const L0 = line * cell;
-        for (let k = 0; k < 3; k++) {
-            const mid0 = k * cell + cell * 0.3, mid1 = (k + 1) * cell - cell * 0.3;
-            // vertical border between column line-1 and line, in row k
-            let minV = Infinity, minH = Infinity;
-            for (let d = -reach; d <= reach; d += 1) {
-                const colV = [], colH = [];
-                for (let t = mid0; t <= mid1; t += 3) {
-                    colV.push(lum(Math.min(size - 1, Math.max(0, L0 + d)), t));
-                    colH.push(lum(t, Math.min(size - 1, Math.max(0, L0 + d))));
-                }
-                colV.sort((a, b) => a - b); colH.sort((a, b) => a - b);
-                minV = Math.min(minV, colV[colV.length >> 1]);
-                minH = Math.min(minH, colH[colH.length >> 1]);
-            }
-            const aV = cellLum[k * 3 + line - 1], bV = cellLum[k * 3 + line];
-            const aH = cellLum[(line - 1) * 3 + k], bH = cellLum[line * 3 + k];
-            if (minV < 0.7 * Math.min(aV, bV)) darkBorders++;
-            if (minH < 0.7 * Math.min(aH, bH)) darkBorders++;
-        }
-    }
-    return darkBorders >= 9;
+function sampleStickers(ctx2, size) {
+    const res = CubeLogic.analyzeFaceImage(ctx2.getImageData(0, 0, size, size).data, size);
+    liveLooksLikeCube = res.looksLikeCube;
+    return res.cells;
 }
 
 /* Centre colours of the faces already captured – used as references
@@ -647,8 +591,11 @@ function updateLiveDots() {
     }
 }
 
-/* Auto-capture: once the picture has been steady for ~0.6 s and the
-   centre is a face that hasn't been scanned yet, capture it. */
+/* Auto-capture: capture when the picture has been steady for ~0.6 s,
+   the square shows a cube face, and it is a new face. After each capture
+   the cube has to be turned (the centre changes or the face leaves the
+   square) before the next auto-capture, so a face is never taken twice. */
+let autoArmed = true;
 function trackStability() {
     const btn = document.getElementById("btn-capture");
     if (prevCells && liveCells.length === 9) {
@@ -657,13 +604,16 @@ function trackStability() {
     }
     prevCells = liveCells.map(c => c.slice());
 
+    const last = scannedFacesData[scannedFacesData.length - 1];
+    if (!autoArmed && (!liveLooksLikeCube || !last || !CubeLogic.sameColour(liveCells[4], last.rgb[4]))) autoArmed = true;
+
     if (!autoCapture) { btn.innerText = "CAPTURE"; return; }
     if (!liveLooksLikeCube) {
         btn.innerText = "ALIGN CUBE";
         stableFrames = 0;
         return;
     }
-    if (isAlreadyScanned(liveCells[4], null)) {
+    if (!autoArmed || isAlreadyScanned(liveCells[4], null)) {
         btn.innerText = "TURN CUBE";
         stableFrames = 0;
         return;
@@ -676,23 +626,12 @@ function trackStability() {
     }
 }
 
-/* Has a face with this centre already been captured? Centres are compared
-   by hue (lighting changes brightness much more than hue); white centres
-   have almost no hue, so any two near-grey centres count as the same. */
-function sameCentreColour(rgbA, rgbB) {
-    const a = CubeLogic.rgbToLab(rgbA), b = CubeLogic.rgbToLab(rgbB);
-    const ca = Math.hypot(a[1], a[2]), cb = Math.hypot(b[1], b[2]);
-    const NEUTRAL = 18;
-    if (ca < NEUTRAL || cb < NEUTRAL) return ca < NEUTRAL && cb < NEUTRAL;
-    let dh = Math.abs(Math.atan2(a[2], a[1]) - Math.atan2(b[2], b[1])) * 180 / Math.PI;
-    if (dh > 180) dh = 360 - dh;
-    return dh < 12;
-}
-
+/* Has this face already been captured? Only nearly identical centre
+   colours count, so similar colours (red/orange) never block a scan. */
 function isAlreadyScanned(centreRgb, manualCentre) {
     return scannedFacesData.some(f => {
         if (manualCentre && f.manual[4]) return manualCentre === f.manual[4];
-        return sameCentreColour(centreRgb, f.rgb[4]);
+        return CubeLogic.sameColour(centreRgb, f.rgb[4]);
     });
 }
 
@@ -710,11 +649,9 @@ function captureFace(isAuto) {
         shown.push(dots[i].dataset.color);
     }
 
-    // Don't accept the same face twice
-    if (isAlreadyScanned(liveCells[4], manual[4])) {
-        if (!isAuto) camSubMsg.innerText = "This face is already scanned – turn the cube as shown.";
-        return;
-    }
+    // Auto-capture never takes the same face twice; a manual CAPTURE is
+    // always accepted (the user decides), duplicates are reported later.
+    if (isAuto && isAlreadyScanned(liveCells[4], manual[4])) return;
 
     scannedFacesData.push({ rgb: liveCells.map(c => c.slice()), manual });
 
@@ -728,6 +665,7 @@ function captureFace(isAuto) {
 
     for (let d of dots) d.dataset.manual = "";
     stableFrames = 0;
+    autoArmed = false;
 
     scanIndex++;
     if (scanIndex >= 6) {

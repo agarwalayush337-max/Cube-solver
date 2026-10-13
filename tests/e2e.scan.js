@@ -21,10 +21,19 @@ const server = http.createServer((req, res) => {
 });
 
 /* Camera-like sticker colours */
-const CAM_RGB = {
+/* STYLE=stickerless: colours measured from a real stickerless cube
+   (dark red + red-orange, lime green, sky blue), hairline gaps, and the
+   cube turned straight from one face to the next (no empty frames). */
+const STICKERLESS = process.env.STYLE === "stickerless";
+const STICKERLESS_RGB = {
+    U: [215, 212, 195], R: [143, 31, 24], F: [138, 229, 92],
+    D: [216, 233, 76], L: [219, 77, 52], B: [70, 130, 195]
+};
+const CAM_RGB_CLASSIC = {
     U: [222, 226, 220], R: [175, 28, 38], F: [25, 150, 85],
     D: [232, 208, 45], L: [238, 104, 35], B: [25, 72, 168]
 };
+const CAM_RGB = STICKERLESS ? STICKERLESS_RGB : CAM_RGB_CLASSIC;
 const ORDER = ["U", "F", "R", "B", "L", "D"];
 const EXPECTED_ROT = [0, 0, 0, 0, 0, 3];
 
@@ -43,6 +52,7 @@ const EXPECTED_ROT = [0, 0, 0, 0, 0, 3];
         cv.width = 1280; cv.height = 720;
         const g = cv.getContext("2d");
         window.__face = null;
+        window.__gap = 0.08;
         function draw() {
             g.fillStyle = "#6b5440"; g.fillRect(0, 0, cv.width, cv.height);
             const v = document.getElementById("cam-video"), grid = document.getElementById("grid-overlay");
@@ -55,11 +65,11 @@ const EXPECTED_ROT = [0, 0, 0, 0, 0, 3];
                 const sc = v.videoWidth / rw;
                 const sx = (gr.left - vr.left - rx) * sc, sy = (gr.top - vr.top - ry) * sc, sw = gr.width * sc;
                 const cell = sw / 3;
-                g.fillStyle = "#111"; g.fillRect(sx, sy, sw, sw);
+                g.fillStyle = window.__gap < 0.05 ? "#3c3732" : "#111"; g.fillRect(sx, sy, sw, sw);
                 window.__face.forEach((rgb, i) => {
                     const r = Math.floor(i / 3), c = i % 3;
                     g.fillStyle = `rgb(${rgb.join(",")})`;
-                    g.fillRect(sx + c * cell + cell * 0.08, sy + r * cell + cell * 0.08, cell * 0.84, cell * 0.84);
+                    const gp = window.__gap; g.fillRect(sx + c * cell + cell * gp, sy + r * cell + cell * gp, cell * (1 - 2 * gp), cell * (1 - 2 * gp));
                     /* a glare spot on some stickers */
                     if ((i + window.__glare) % 4 === 0) { g.fillStyle = "rgba(255,255,255,0.9)"; g.fillRect(sx + c * cell + cell * 0.3, sy + r * cell + cell * 0.3, cell * 0.08, cell * 0.08); }
                 });
@@ -72,6 +82,7 @@ const EXPECTED_ROT = [0, 0, 0, 0, 0, 3];
     });
 
     await page.goto(`http://localhost:${port}/index.html`);
+    if (STICKERLESS) await page.evaluate(() => { window.__gap = 0.015; });
     await page.waitForFunction(() => document.getElementById("status").innerText.startsWith("Ready"), null, { timeout: 120000 });
     console.log("engine ready");
 
@@ -91,9 +102,12 @@ const EXPECTED_ROT = [0, 0, 0, 0, 0, 3];
             const light = 0.7 + Math.random() * 0.45;
             const cast = [1 + (Math.random() - 0.5) * 0.12, 1, 1 + (Math.random() - 0.5) * 0.12];
             const rgb = seen.map(c => CAM_RGB[c].map((v, ch) => Math.max(0, Math.min(255, Math.round(v * light * cast[ch])))));
-            /* moving between faces: blank frames, then the new face */
-            await page.evaluate(() => { window.__face = null; });
-            await page.waitForTimeout(300);
+            /* moving between faces: blank frames, then the new face
+               (stickerless mode: straight to the next face) */
+            if (!STICKERLESS) {
+                await page.evaluate(() => { window.__face = null; });
+                await page.waitForTimeout(300);
+            }
             await page.evaluate(([face, gl]) => { window.__face = face; window.__glare = gl; }, [rgb, step]);
             try {
                 await page.waitForFunction(n => scanIndex > n || !isCameraActive, step, { timeout: 15000 });

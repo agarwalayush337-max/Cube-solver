@@ -14,8 +14,10 @@ const TRUE_RGB = {
     D: [235, 210, 40], L: [240, 100, 30], B: [20, 70, 170]
 };
 
+let TRUE_RGB_ACTIVE = TRUE_RGB;
+let NOISE = 6;
 function shadeFace(rgb, light, cast) {
-    return rgb.map((v, i) => Math.max(0, Math.min(255, Math.round(v * light * cast[i] + gauss() * 6))));
+    return rgb.map((v, i) => Math.max(0, Math.min(255, Math.round(v * light * cast[i] + gauss() * NOISE))));
 }
 
 function simulateScan(facelets, harsh) {
@@ -29,13 +31,23 @@ function simulateScan(facelets, harsh) {
         const seen = L.rotateGrid(grid, 4 - r);
         const light = harsh ? 0.55 + rand() * 0.6 : 0.8 + rand() * 0.3;
         const cast = harsh ? [1 + (rand() - 0.5) * 0.15, 1, 1 + (rand() - 0.5) * 0.15] : [1, 1, 1];
-        scans.push(seen.map(c => shadeFace(TRUE_RGB[c], light, cast)));
+        scans.push(seen.map(c => shadeFace(TRUE_RGB_ACTIVE[c], light, cast)));
         truthRot.push(r);
     });
     return { scans, order, truthRot };
 }
 
-function run(n, harsh, useExpected) {
+/* Colours measured from a real stickerless cube on a phone camera */
+const STICKERLESS_RGB = {
+    U: [215, 212, 195], R: [143, 31, 24], F: [138, 229, 92],
+    D: [216, 233, 76], L: [219, 77, 52], B: [70, 130, 195]
+};
+
+function run(n, harsh, useExpected, palette) {
+    if (palette) TRUE_RGB_ACTIVE = palette; else TRUE_RGB_ACTIVE = TRUE_RGB;
+    /* each sticker is the median of 49 camera pixels, so per-sticker noise is
+       small; 6 is very pessimistic, 3 is still cautious for the dark-red cube */
+    NOISE = palette ? 3 : 6;
     let ok = 0, wrong = 0, fail = 0, fixedCount = 0, multi = 0;
     const t0 = Date.now();
     for (let t = 0; t < n; t++) {
@@ -47,7 +59,7 @@ function run(n, harsh, useExpected) {
         if (res.solutions > 1) multi++;
         if (res.facelets === cube) ok++; else wrong++;
     }
-    console.log(`${harsh ? "harsh" : "normal"} light${useExpected ? " (scan order followed)" : " (any order)"}: ${ok}/${n} exact, ${wrong} wrong, ${fail} unresolved, ${fixedCount} auto-fixed, ${multi} with >1 valid orientation, ${((Date.now() - t0) / n).toFixed(1)} ms/scan`);
+    console.log(`${palette ? "stickerless, " : ""}${harsh ? "harsh" : "normal"} light${useExpected ? " (scan order followed)" : " (any order)"}: ${ok}/${n} exact, ${wrong} wrong, ${fail} unresolved, ${fixedCount} auto-fixed, ${multi} with >1 valid orientation, ${((Date.now() - t0) / n).toFixed(1)} ms/scan`);
     return { ok, wrong, fail };
 }
 
@@ -85,6 +97,18 @@ const N = 300;
 const r1 = run(N, false, true);
 const r2 = run(N, true, true);
 const r3 = run(N, false, false);
+const r4 = run(N, false, true, STICKERLESS_RGB);
+const r5 = run(N, true, true, STICKERLESS_RGB);
 assert(r1.wrong === 0 && r1.fail === 0, "normal light, scan order followed: every cube read exactly");
 assert(r2.ok / N >= 0.98, "harsh light, scan order followed: >= 98% exact");
 assert(r3.ok / N >= 0.97, "any scan order: >= 97% exact");
+assert(r4.wrong === 0 && r4.ok / N >= 0.99, "stickerless cube, normal light: >= 99% exact");
+assert(r5.wrong <= 3 && r5.ok / N >= 0.93, "stickerless cube, harsh light: >= 93% exact");
+
+/* live preview guesses on real camera readings */
+const realReadings = { B: [[66, 126, 190], [73, 133, 197]], F: [[138, 229, 92], [127, 216, 81], [145, 232, 98]],
+    D: [[214, 234, 76], [218, 234, 76]], L: [[219, 77, 52], [220, 80, 56]], R: [[143, 31, 24]], U: [[216, 214, 196], [215, 210, 191]] };
+Object.keys(realReadings).forEach(f => realReadings[f].forEach(rgb =>
+    assert(L.guessLetter(rgb) === f, `live guess ${JSON.stringify(rgb)} -> ${L.SCHEME[f]} (got ${L.SCHEME[L.guessLetter(rgb)]})`)));
+assert(!L.sameColour([219, 77, 52], [143, 31, 24]), "stickerless red and orange centres are different");
+assert(L.sameColour([219, 77, 52], [150, 52, 35]), "same orange centre in dimmer light counts as same");
