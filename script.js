@@ -28,8 +28,13 @@ const ALL_EDGES = [
 ];
 
 const SCRAMBLE_MOVES = ["U","U'","R","R'","F","F'","D","D'","L","L'","B","B'"];
-const PLAY_SPEED = 400; 
-const MOVE_GAP = 300;   
+const PLAY_SPEED = 900;    // ms for a quarter turn (a half turn takes 1.5x)
+const MOVE_GAP = 1200;     // pause between moves while playing
+
+// Viewing angle like a cube held in front of you: turned 45° so the front and
+// right faces show equally, then tipped forward so the top shows. Yaw first,
+// then pitch, keeps the vertical edges upright (no sideways tilt).
+const VIEW_TILT = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.5, -Math.PI / 4, 0, "XYZ"));
 
 /* =======================
    GLOBAL STATE
@@ -90,6 +95,7 @@ statsDiv.style.fontWeight = "bold";
 statsDiv.style.pointerEvents = "none";
 statsDiv.style.textShadow = "0 0 5px black";
 statsDiv.innerText = "Autofilled: 0";
+statsDiv.style.display = "none";   // manual painting removed
 document.body.appendChild(statsDiv);
 
 // Camera Button
@@ -329,7 +335,7 @@ solverWorker.onmessage = (e) => {
     const d = e.data;
     if (d.type === "ready") {
         engineReady = true;
-        statusEl.innerText = "Ready! Paint, Scan or Scramble.";
+        statusEl.innerText = "Ready! Tap SCAN CUBE.";
         statusEl.style.color = "#00ff00";
         if (pendingSolve) { pendingSolve = false; solveCube(); }
     }
@@ -347,15 +353,8 @@ solverWorker.onmessage = (e) => {
 
         let rawMoves = d.solution.trim().split(/\s+/).filter(m => m.length > 0);
         solutionMoves = [];
-        rawMoves.forEach(move => {
-            if (move.includes("2")) {
-                let base = move.replace("2", "");
-                solutionMoves.push(base); solutionMoves.push(base); 
-            } else {
-                solutionMoves.push(move);
-            }
-        });
-        
+        // keep double turns (F2) as one step
+        solutionMoves = rawMoves.slice();
         moveIndex = 0;
         document.getElementById("action-controls").style.display = "none";
         document.getElementById("playback-controls").style.display = "flex";
@@ -376,7 +375,7 @@ function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x111111);
     camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 0, 16); 
+    camera.position.set(0, 0, 19);
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -410,8 +409,7 @@ function init() {
 
     createCube();
     
-    pivotGroup.rotation.x = 0.5;
-    pivotGroup.rotation.y = -0.6;
+    pivotGroup.quaternion.copy(VIEW_TILT);
 
     document.addEventListener("mousedown", onInputStart);
     document.addEventListener("mousemove", onInputMove);
@@ -572,6 +570,7 @@ const detCtx = detCanvas.getContext("2d", { willReadFrequently: true });
 let gridState = null;      // smoothed { x, y, size } relative to the camera area
 let gridLostFrames = 0;
 let frameCounter = 0;
+let gridMoving = false;    // the grid is still sliding onto the cube
 
 function defaultGridRect(top) {
     const size = Math.min(window.innerWidth * 0.66, window.innerHeight * 0.30);
@@ -604,10 +603,13 @@ function trackFaceGrid() {
         // smooth the movement; jump if the cube moved a lot
         const jump = Math.abs(target.x - gridState.x) + Math.abs(target.y - gridState.y) > target.size * 0.5;
         const a = jump ? 1 : 0.35;
+        gridMoving = Math.abs(target.x - gridState.x) + Math.abs(target.y - gridState.y) +
+                     Math.abs(target.size - gridState.size) > target.size * 0.04;
         gridState = { x: gridState.x + (target.x - gridState.x) * a, y: gridState.y + (target.y - gridState.y) * a,
                       size: gridState.size + (target.size - gridState.size) * a };
         gridEl.classList.add("locked");
     } else if (++gridLostFrames > 15) {
+        gridMoving = false;
         gridState = defaultGridRect(top);
         gridEl.classList.remove("locked");
     }
@@ -687,7 +689,7 @@ function trackStability() {
     let steady = false;
     if (prevCells && liveCells.length === 9) {
         const change = Math.max(...liveCells.map((c, i) => CubeLogic.redmeanDistance(c, prevCells[i])));
-        steady = change < STABLE_MAX_CHANGE && guess === steadyGuess;
+        steady = change < STABLE_MAX_CHANGE && guess === steadyGuess && !gridMoving;
     }
     prevCells = liveCells.map(c => c.slice());
     steadyGuess = guess;
@@ -856,7 +858,6 @@ function scanCellToFacelet(face, rot, cell) {
 /* Turn the 3D cube so that `face` points at the viewer with the same
    side up as in the camera (grid rotation `rot` from the scan), plus a
    small tilt so the top and right faces are visible too. */
-const VIEW_TILT = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.42, -0.55, 0, "YXZ"));
 function orientViewToScan(face, rot) {
     const n = CubeLogic.NORMAL[face];
     const u = CubeLogic.imageUpFor(face, rot);
@@ -909,7 +910,7 @@ function processScannedData() {
         const bad = [];
         res.errors.forEach(e => (e.facelets || []).forEach(i => bad.push(i)));
         highlightFacelets(bad);
-        statusEl.innerText = "Check the glowing stickers: " + res.errors[0].message + " Tap to fix, then SOLVE.";
+        statusEl.innerText = res.errors[0].message + " Please scan again.";
         statusEl.style.color = "orange";
     }
 }
@@ -1109,6 +1110,7 @@ function calculatePredictiveHint(boardPieces) {
 }
 
 function handlePaint(clientX, clientY) {
+    return; // manual colour painting removed – colours come from the scan
     if (isAnimating) return;
     mouse.x = (clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(clientY / window.innerHeight) * 2 + 1;
@@ -1151,7 +1153,10 @@ function clearCube() {
 function getVisualMove(move) {
     const face = move[0], suffix = move.substring(1);
     const logicalAxes = { U:new THREE.Vector3(0,1,0), D:new THREE.Vector3(0,-1,0), R:new THREE.Vector3(1,0,0), L:new THREE.Vector3(-1,0,0), F:new THREE.Vector3(0,0,1), B:new THREE.Vector3(0,0,-1) };
-    const vec = logicalAxes[face].clone().applyQuaternion(pivotGroup.quaternion); 
+    // Name moves relative to how the cube is held (front = face towards you),
+    // not the tilted 3D view – at 45° two faces would tie.
+    const held = VIEW_TILT.clone().invert().multiply(pivotGroup.quaternion);
+    const vec = logicalAxes[face].clone().applyQuaternion(held);
     let bestFace = face, maxDot = -Infinity;
     for(const [k, v] of Object.entries(logicalAxes)) {
         const dot = vec.dot(v);
@@ -1165,7 +1170,7 @@ function updateDisplayMoves() {
     if(displayMoves.length > 0) solutionTextEl.innerText = "Visual: " + displayMoves.join(" ");
 }
 
-function rotateFace(move, reverse=false, onComplete=null) {
+function rotateFace(move, reverse=false, onComplete=null, duration=PLAY_SPEED) {
     if (isAnimating && !onComplete) return;
     isAnimating = true;
     let face = move[0], prime = move.includes("'");
@@ -1183,10 +1188,12 @@ function rotateFace(move, reverse=false, onComplete=null) {
     const pivot = new THREE.Object3D();
     pivotGroup.add(pivot);
     group.forEach(c => pivot.attach(c));
-    const targetAngle = (Math.PI/2) * dir, start = Date.now();
+    const turns = move.includes("2") ? 2 : 1;          // F2 = one half turn
+    const targetAngle = (Math.PI/2) * dir * turns, start = Date.now();
+    const time = duration * (turns === 2 ? 1.5 : 1);
     function step(){
         const now = Date.now();
-        let p = (now - start) / PLAY_SPEED;
+        let p = (now - start) / time;
         if(p > 1) p = 1;
         const ease = p * (2 - p);
         pivot.rotation[axis] = targetAngle * ease;
@@ -1212,7 +1219,7 @@ function scrambleCube() {
     statusEl.innerText = "Scrambling...";
     const moves = Array.from({length: 20}, () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]);
     let i = 0;
-    function nextMove() { if(i < moves.length) rotateFace(moves[i++], false, nextMove); else statusEl.innerText = "Ready to Solve"; }
+    function nextMove() { if(i < moves.length) rotateFace(moves[i++], false, nextMove, 250); else statusEl.innerText = "Ready to Solve"; }
     nextMove();
 }
 
