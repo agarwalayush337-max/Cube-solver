@@ -207,7 +207,7 @@ guideStyle.innerHTML = `
         position: absolute;
         width: min(66vw, 30vh);
         height: min(66vw, 30vh);
-        margin-top: 2vh;
+        transition: left 0.08s linear, top 0.08s linear, width 0.08s linear, height 0.08s linear, border-color 0.2s;
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
         grid-template-rows: 1fr 1fr 1fr;
@@ -215,6 +215,8 @@ guideStyle.innerHTML = `
         box-shadow: 0 0 30px rgba(0,0,0,0.7);
         z-index: 5;
     }
+    #grid-overlay.locked { border-color: rgba(0,220,255,0.95); }
+    #grid-overlay.locked > div { border-color: rgba(0,220,255,0.7) !important; }
 `;
 document.head.appendChild(guideStyle);
 
@@ -470,6 +472,9 @@ async function startCameraMode() {
         autoArmed = true;
         steadyFrames = [];
         pausedUntil = 0;
+        gridState = null;
+        gridLostFrames = 0;
+        gridEl.classList.remove("locked");
         document.getElementById("btn-undo").style.display = "none";
         clearHighlights();
         
@@ -537,41 +542,90 @@ function updateCamInstruction() {
 }
 
 
+/* Where a screen rectangle (relative to the page) lies in the video frame */
+function screenRectToVideo(rect) {
+    const videoRect = videoEl.getBoundingClientRect();
+    const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
+    const displayRatio = videoRect.width / videoRect.height;
+    let renderW, renderH, renderX, renderY;
+    if (displayRatio > videoRatio) {
+        renderW = videoRect.width; renderH = videoRect.width / videoRatio;
+        renderX = 0; renderY = (videoRect.height - renderH) / 2;
+    } else {
+        renderW = videoRect.height * videoRatio; renderH = videoRect.height;
+        renderX = (videoRect.width - renderW) / 2; renderY = 0;
+    }
+    const scale = videoEl.videoWidth / renderW;
+    return {
+        x: (rect.left - videoRect.left - renderX) * scale,
+        y: (rect.top - videoRect.top - renderY) * scale,
+        w: rect.width * scale, h: rect.height * scale
+    };
+}
+
+/* ---- Tracking grid: find the cube face in a wide area of the picture
+   and move the grid onto it (like ASolver's grid that follows the cube). */
+const DET_SIZE = 160;
+const detCanvas = document.createElement("canvas");
+detCanvas.width = detCanvas.height = DET_SIZE;
+const detCtx = detCanvas.getContext("2d", { willReadFrequently: true });
+let gridState = null;      // smoothed { x, y, size } relative to the camera area
+let gridLostFrames = 0;
+let frameCounter = 0;
+
+function defaultGridRect(top) {
+    const size = Math.min(window.innerWidth * 0.66, window.innerHeight * 0.30);
+    return { x: (top.width - size) / 2, y: (top.height - size) / 2 + top.height * 0.04, size };
+}
+
+function placeGrid(r) {
+    gridEl.style.left = r.x + "px";
+    gridEl.style.top = r.y + "px";
+    gridEl.style.width = gridEl.style.height = r.size + "px";
+}
+
+function trackFaceGrid() {
+    const topEl = gridEl.parentElement;
+    const top = topEl.getBoundingClientRect();
+    if (!gridState) { gridState = defaultGridRect(top); placeGrid(gridState); }
+    if (frameCounter++ % 2) return;                 // every other frame is enough
+
+    // search a square covering most of the camera area
+    const side = Math.min(top.width, top.height) * 0.94;
+    const search = { left: top.left + (top.width - side) / 2, top: top.top + (top.height - side) / 2, width: side, height: side };
+    const src = screenRectToVideo(search);
+    detCtx.drawImage(videoEl, src.x, src.y, src.w, src.h, 0, 0, DET_SIZE, DET_SIZE);
+    const det = CubeLogic.detectFaceGrid(detCtx.getImageData(0, 0, DET_SIZE, DET_SIZE).data, DET_SIZE, DET_SIZE);
+
+    if (det && det.score >= 7) {
+        gridLostFrames = 0;
+        const k = side / DET_SIZE;
+        const target = { x: search.left - top.left + det.x * k, y: search.top - top.top + det.y * k, size: det.size * k };
+        // smooth the movement; jump if the cube moved a lot
+        const jump = Math.abs(target.x - gridState.x) + Math.abs(target.y - gridState.y) > target.size * 0.5;
+        const a = jump ? 1 : 0.35;
+        gridState = { x: gridState.x + (target.x - gridState.x) * a, y: gridState.y + (target.y - gridState.y) * a,
+                      size: gridState.size + (target.size - gridState.size) * a };
+        gridEl.classList.add("locked");
+    } else if (++gridLostFrames > 15) {
+        gridState = defaultGridRect(top);
+        gridEl.classList.remove("locked");
+    }
+    placeGrid(gridState);
+}
+
 function processCameraFrame() {
     if(!isCameraActive) return;
 
     if(videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
-        const gridRect = gridEl.getBoundingClientRect();
-        const videoRect = videoEl.getBoundingClientRect();
-        const videoRatio = videoEl.videoWidth / videoEl.videoHeight;
-        const displayRatio = videoRect.width / videoRect.height;
-        let renderW, renderH, renderX, renderY;
-        
-        if (displayRatio > videoRatio) {
-            renderW = videoRect.width;
-            renderH = videoRect.width / videoRatio;
-            renderX = 0;
-            renderY = (videoRect.height - renderH) / 2;
-        } else {
-            renderW = videoRect.height * videoRatio;
-            renderH = videoRect.height;
-            renderX = (videoRect.width - renderW) / 2;
-            renderY = 0;
-        }
-
-        const relGridX = (gridRect.left - videoRect.left) - renderX;
-        const relGridY = (gridRect.top - videoRect.top) - renderY;
-        const scale = videoEl.videoWidth / renderW;
-        const srcX = relGridX * scale;
-        const srcY = relGridY * scale;
-        const srcW = gridRect.width * scale;
-        const srcH = gridRect.height * scale;
+        trackFaceGrid();
+        const src = screenRectToVideo(gridEl.getBoundingClientRect());
 
         canvasEl.width = 300;
         canvasEl.height = 300;
         const ctx2 = canvasEl.getContext("2d");
-        ctx2.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, 300, 300);
-        
+        ctx2.drawImage(videoEl, src.x, src.y, src.w, src.h, 0, 0, 300, 300);
+
         liveCells = sampleStickers(ctx2, 300);
         updateLiveDots();
         trackStability();
@@ -843,9 +897,9 @@ function processScannedData() {
 
     if (res.ok) {
         if (res.fixed.length) {
-            const idx = res.fixed.map(fx => scanCellToFacelet(res.faceOfScan[fx.scan], res.rotByScan[fx.scan], fx.index));
+            const idx = res.fixed.map(fx => fx.facelet);
             highlightFacelets(idx);
-            statusEl.innerText = "Scanned! Auto-corrected " + res.fixed.length + " unclear stickers (glowing) – check them. Solving…";
+            statusEl.innerText = "Scanned! " + res.fixed.length + " unclear sticker" + (res.fixed.length > 1 ? "s were" : " was") + " corrected using the cube's pieces (glowing) – check them. Solving…";
         } else {
             statusEl.innerText = "Scanned! Keep the last face towards you – solving…";
         }

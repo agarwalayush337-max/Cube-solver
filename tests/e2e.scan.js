@@ -88,7 +88,15 @@ function cameraView(cube, Q) {
             g.fillStyle = "#6b5440"; g.fillRect(0, 0, cv.width, cv.height);
             const v = document.getElementById("cam-video"), grid = document.getElementById("grid-overlay");
             if (window.__face && v && grid && v.videoWidth) {
-                const gr = grid.getBoundingClientRect(), vr = v.getBoundingClientRect();
+                /* the cube is held at a random place in the camera view (TRACK=1),
+                   otherwise exactly under the guide square */
+                let gr = grid.getBoundingClientRect();
+                const vr = v.getBoundingClientRect();
+                if (window.__place) {
+                    const top = grid.parentElement.getBoundingClientRect(), m = Math.min(top.width, top.height);
+                    const size = m * window.__place.s;
+                    gr = { left: top.left + top.width / 2 - size / 2 + window.__place.dx * m, top: top.top + top.height / 2 - size / 2 + window.__place.dy * m, width: size, height: size };
+                }
                 const vRatio = v.videoWidth / v.videoHeight, dRatio = vr.width / vr.height;
                 let rw, rh, rx, ry;
                 if (dRatio > vRatio) { rw = vr.width; rh = vr.width / vRatio; rx = 0; ry = (vr.height - rh) / 2; }
@@ -141,7 +149,12 @@ function cameraView(cube, Q) {
                 await page.evaluate(() => { window.__face = null; });
                 await page.waitForTimeout(300);
             }
-            await page.evaluate(([face, gl]) => { window.__face = face; window.__glare = gl; }, [rgb, step]);
+            const place = process.env.TRACK ? { s: 0.45 + Math.random() * 0.3, dx: (Math.random() - 0.5) * 0.25, dy: (Math.random() - 0.5) * 0.2 } : null;
+            await page.evaluate(([face, gl, pl]) => { window.__face = face; window.__glare = gl; window.__place = pl; }, [rgb, step, place]);
+            if (process.env.TRACK && step === 1 && run === 0) {
+                await page.waitForTimeout(700);
+                await page.screenshot({ path: path.join(__dirname, "e2e-tracking.png") });
+            }
             try {
                 await page.waitForFunction(n => scanIndex > n || !isCameraActive, step, { timeout: 15000 });
             } catch (e) {

@@ -172,6 +172,76 @@
         return { cells, looksLikeCube, darkBorders, cubeColoured, even, chromatic, spreads };
     }
 
+    /* ---------- finding the cube face in the camera picture ---------- */
+
+    /* img: RGBA bytes of a W x H picture. A 3x3 face shows as 4 evenly
+       spaced lines in each direction (the outer edges and the gaps between
+       stickers), with flat colour in between. Colour edges are summed into
+       column and row profiles, and the best evenly spaced set of 4 peaks
+       (with low values half-way between them) is found, using the same
+       spacing horizontally and vertically.
+       Returns { x, y, size, score } in picture pixels, or null. */
+    function detectFaceGrid(img, W, H) {
+        const gx = new Float32Array(W * H), gy = new Float32Array(W * H);
+        const at = (x, y) => (y * W + x) * 4;
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const l = at(x - 1, y), r = at(x + 1, y), u = at(x, y - 1), d = at(x, y + 1);
+                gx[y * W + x] = Math.abs(img[r] - img[l]) + Math.abs(img[r + 1] - img[l + 1]) + Math.abs(img[r + 2] - img[l + 2]);
+                gy[y * W + x] = Math.abs(img[d] - img[u]) + Math.abs(img[d + 1] - img[u + 1]) + Math.abs(img[d + 2] - img[u + 2]);
+            }
+        }
+        const profile = (g, along, y0, y1, horizontal) => {
+            const p = new Float32Array(along);
+            for (let a = 0; a < along; a++) {
+                let sum = 0;
+                for (let b = y0; b < y1; b++) sum += horizontal ? g[b * W + a] : g[a * W + b];
+                p[a] = sum / Math.max(1, y1 - y0);
+            }
+            return p;
+        };
+        const peak = (p, v) => {
+            const i = Math.round(v);
+            let m = 0;
+            for (let d = -1; d <= 1; d++) if (i + d >= 0 && i + d < p.length) m = Math.max(m, p[i + d]);
+            return m;
+        };
+        const val = (p, v) => { const i = Math.round(v); return i >= 0 && i < p.length ? p[i] : 0; };
+        /* best start for a given spacing: strong lines, flat stickers */
+        const bestStart = (p, s) => {
+            let best = -Infinity, bx = 0;
+            for (let x0 = 0; x0 + 3 * s < p.length; x0++) {
+                let line = 0, mid = 0;
+                for (let k = 0; k < 4; k++) line += peak(p, x0 + k * s);
+                for (let k = 0; k < 3; k++) mid += val(p, x0 + (k + 0.5) * s);
+                const sc = line / 4 - mid / 3;
+                if (sc > best) { best = sc; bx = x0; }
+            }
+            return { x0: bx, score: best };
+        };
+        const minS = Math.floor(Math.min(W, H) * 0.11), maxS = Math.floor(Math.min(W, H) * 0.33);
+        const search = (px, py) => {
+            let best = null;
+            for (let s = minS; s <= maxS; s++) {
+                const bx = bestStart(px, s), by = bestStart(py, s);
+                const sc = bx.score + by.score;
+                if (!best || sc > best.score) best = { x: bx.x0, y: by.x0, s, score: sc };
+            }
+            return best;
+        };
+        /* pass 1: whole picture; pass 2: profiles limited to the face found */
+        let g = search(profile(gx, W, 0, H, true), profile(gy, H, 0, W, false));
+        if (!g) return null;
+        const y0 = Math.max(0, g.y), y1 = Math.min(H, g.y + 3 * g.s), x0 = Math.max(0, g.x), x1 = Math.min(W, g.x + 3 * g.s);
+        const g2 = search(profile(gx, W, y0, y1, true), profile(gy, H, x0, x1, false));
+        if (g2) g = g2;
+        /* how much the lines stand out from the picture's average edges */
+        let mean = 0;
+        for (let i = 0; i < W * H; i++) mean += gx[i] + gy[i];
+        mean /= (2 * W * H);
+        return { x: g.x, y: g.y, size: 3 * g.s, score: g.score / Math.max(1, mean) };
+    }
+
     /* "Redmean" weighted RGB distance (fast, used for live checks). */
     function redmeanDistance(c1, c2) {
         const rm = (c1[0] + c2[0]) / 2;
@@ -682,6 +752,184 @@
         return null;
     }
 
+    /* ---------- piece-based matching (whole corners and edges) ---------- */
+
+    /* C: 54 cost maps (C[i][colour] = how unlike that colour sticker i is).
+       Each scanned corner/edge position is matched to a real piece and
+       orientation as a whole, every real piece used exactly once (optimal
+       assignment). Then the cube rules are enforced with the cheapest
+       changes: corner twist, edge flip and permutation parity.
+       Always returns a valid cube and its total cost. */
+    function pieceSolve(C) {
+        const cc = (i, j, o) => {
+            const fl = CORNER_FACELETS[i], col = CORNER_COLORS[j];
+            return C[fl[o % 3]][col[0]] + C[fl[(o + 1) % 3]][col[1]] + C[fl[(o + 2) % 3]][col[2]];
+        };
+        const ec = (i, j, o) => {
+            const fl = EDGE_FACELETS[i], col = EDGE_COLORS[j];
+            return o ? C[fl[0]][col[1]] + C[fl[1]][col[0]] : C[fl[0]][col[0]] + C[fl[1]][col[1]];
+        };
+        const cornerCost = [], cornerOri = [];
+        for (let i = 0; i < 8; i++) {
+            cornerCost.push([]); cornerOri.push([]);
+            for (let j = 0; j < 8; j++) {
+                let best = Infinity, bo = 0;
+                for (let o = 0; o < 3; o++) { const v = cc(i, j, o); if (v < best) { best = v; bo = o; } }
+                cornerCost[i].push(best); cornerOri[i].push(bo);
+            }
+        }
+        const edgeCost = [], edgeOri = [];
+        for (let i = 0; i < 12; i++) {
+            edgeCost.push([]); edgeOri.push([]);
+            for (let j = 0; j < 12; j++) {
+                const a = ec(i, j, 0), b = ec(i, j, 1);
+                edgeCost[i].push(Math.min(a, b)); edgeOri[i].push(a <= b ? 0 : 1);
+            }
+        }
+        const cp = hungarian(cornerCost), ep = hungarian(edgeCost);
+
+        /* complete a permutation choice: best orientations, then fix twist and flip */
+        const complete = (cp, ep) => {
+            const co = cp.map((j, i) => cornerOri[i][j]), eo = ep.map((j, i) => edgeOri[i][j]);
+            let cost = 0;
+            cp.forEach((j, i) => { cost += cc(i, j, co[i]); });
+            ep.forEach((j, i) => { cost += ec(i, j, eo[i]); });
+            const tw = co.reduce((a, b) => a + b, 0) % 3;
+            if (tw) {
+                let bi = -1, bd = Infinity, bo = 0;
+                for (let i = 0; i < 8; i++) {
+                    for (const no of [(co[i] + 1) % 3, (co[i] + 2) % 3]) {
+                        const t2 = (tw - co[i] + no + 3) % 3;
+                        if (t2 !== 0) continue;
+                        const d = cc(i, cp[i], no) - cc(i, cp[i], co[i]);
+                        if (d < bd) { bd = d; bi = i; bo = no; }
+                    }
+                }
+                co[bi] = bo; cost += bd;
+            }
+            if (eo.reduce((a, b) => a + b, 0) % 2) {
+                let bi = -1, bd = Infinity;
+                for (let i = 0; i < 12; i++) {
+                    const d = ec(i, ep[i], 1 - eo[i]) - ec(i, ep[i], eo[i]);
+                    if (d < bd) { bd = d; bi = i; }
+                }
+                eo[bi] = 1 - eo[bi]; cost += bd;
+            }
+            return { cp, co, ep, eo, cost };
+        };
+
+        let best = complete(cp.slice(), ep.slice());
+        if (permutationParity(cp) !== permutationParity(ep)) {
+            /* swap two corners or two edges – whichever costs least */
+            best = null;
+            for (let a = 0; a < 8; a++) for (let b = a + 1; b < 8; b++) {
+                const c2 = cp.slice(); [c2[a], c2[b]] = [c2[b], c2[a]];
+                const r = complete(c2, ep.slice());
+                if (!best || r.cost < best.cost) best = r;
+            }
+            for (let a = 0; a < 12; a++) for (let b = a + 1; b < 12; b++) {
+                const e2 = ep.slice(); [e2[a], e2[b]] = [e2[b], e2[a]];
+                const r = complete(cp.slice(), e2);
+                if (r.cost < best.cost) best = r;
+            }
+        }
+
+        const f = new Array(54);
+        for (let i = 0; i < 6; i++) f[i * 9 + 4] = FACES[i];
+        best.cp.forEach((j, i) => { for (let k = 0; k < 3; k++) f[CORNER_FACELETS[i][(best.co[i] + k) % 3]] = CORNER_COLORS[j][k]; });
+        best.ep.forEach((j, i) => {
+            const fl = EDGE_FACELETS[i], col = EDGE_COLORS[j];
+            if (best.eo[i]) { f[fl[0]] = col[1]; f[fl[1]] = col[0]; } else { f[fl[0]] = col[0]; f[fl[1]] = col[1]; }
+        });
+        return { facelets: f.join(""), cost: best.cost };
+    }
+
+    /* Rotation combinations worth a full piece match: each sticker may be
+       its best or second-best colour, and at most 2 pieces may look
+       impossible. Pruned search, so it is fast. */
+    function plausibleRotations(costGrid) {
+        const top2 = {};
+        FACES.forEach(f => {
+            top2[f] = [0, 1, 2, 3].map(r => rotateGrid(costGrid[f], r).map(c => {
+                const ord = FACES.slice().sort((a, b) => c[a] - c[b]);
+                return [ord[0], ord[1]];
+            }));
+        });
+        const cand = new Array(54);
+        const has = (i, col) => cand[i][0] === col || cand[i][1] === col;
+        const cornerOk = i => {
+            const fl = CORNER_FACELETS[i];
+            for (let j = 0; j < 8; j++) for (let o = 0; o < 3; o++)
+                if (has(fl[o], CORNER_COLORS[j][0]) && has(fl[(o + 1) % 3], CORNER_COLORS[j][1]) && has(fl[(o + 2) % 3], CORNER_COLORS[j][2])) return true;
+            return false;
+        };
+        const edgeOk = i => {
+            const fl = EDGE_FACELETS[i];
+            for (let j = 0; j < 12; j++) {
+                const e = EDGE_COLORS[j];
+                if ((has(fl[0], e[0]) && has(fl[1], e[1])) || (has(fl[0], e[1]) && has(fl[1], e[0]))) return true;
+            }
+            return false;
+        };
+        const out = [], rot = {};
+        const rec = (i, bad) => {
+            if (i === 6) { out.push(Object.assign({}, rot)); return; }
+            const f = FACES[i];
+            for (let r = 0; r < 4; r++) {
+                rot[f] = r;
+                top2[f][r].forEach((t, k) => { cand[i * 9 + k] = t; });
+                let b = bad;
+                CORNERS_DONE_AT[i].forEach(c => { if (!cornerOk(c)) b++; });
+                EDGES_DONE_AT[i].forEach(e => { if (!edgeOk(e)) b++; });
+                if (b <= 2) rec(i + 1, b);
+            }
+        };
+        rec(0, 0);
+        return out.length ? out : [{ U: 0, R: 0, F: 0, D: 0, L: 0, B: 0 }];
+    }
+
+    /* Run piece matching for one naming of the centres; try the grid
+       rotations predicted by the scan moves, or all 4^6 if unknown. */
+    function pieceProcess(scans, opts, faceOfScan) {
+        const cls = classifyScans(scans, opts.overrides, faceOfScan);
+        const costGrid = {};
+        faceOfScan.forEach((f, s) => {
+            costGrid[f] = cls.costs[s].map((c, k) => {
+                if (k !== 4) return c;
+                const o = {}; FACES.forEach(x => { o[x] = x === f ? 0 : 1e3; }); return o;
+            });
+        });
+        let rotSets;
+        const exp = opts.expectedRotByScan || (opts.motions ? expectedRotations(faceOfScan, opts.motions) : null);
+        if (exp) {
+            const r = {}; faceOfScan.forEach((f, s) => { r[f] = exp[s] || 0; });
+            rotSets = [r];
+        } else {
+            rotSets = plausibleRotations(costGrid);
+        }
+        let best = null;
+        for (const rot of rotSets) {
+            const C = [];
+            FACES.forEach(f => { rotateGrid(costGrid[f], rot[f]).forEach(c => C.push(c)); });
+            const r = pieceSolve(C);
+            if (!best || r.cost < best.cost) best = { facelets: r.facelets, cost: r.cost, rot: Object.assign({}, rot), C };
+        }
+        /* stickers whose final colour is not their own best guess (shown glowing) */
+        const fixed = [];
+        for (let i = 0; i < 54; i++) {
+            if (i % 9 === 4) continue;
+            const c = best.C[i];
+            let arg = null, v = Infinity;
+            FACES.forEach(x => { if (c[x] < v) { v = c[x]; arg = x; } });
+            if (arg !== best.facelets[i]) fixed.push({ facelet: i, from: arg, to: best.facelets[i] });
+        }
+        return {
+            ok: true, facelets: best.facelets, cost: best.cost, faceOfScan,
+            rotByScan: faceOfScan.map(f => best.rot[f]), fixed, errors: [], solutions: 1,
+            letters: cls.letters
+        };
+    }
+
     /* ---------- full scan pipeline with auto-fix ---------- */
 
     /* scans: 6 x 9 RGB (camera order). expectedRotByScan: rotation the
@@ -704,128 +952,19 @@
             .filter(perm => !ov || perm.every((f, s) => !(ov[s] && ov[s][4]) || ov[s][4] === f))
             .slice(0, 6);
         if (!ids.length) return { ok: false, errors: [{ type: "centre", message: "The centre colours you set by hand are not all different.", facelets: [] }] };
-        for (const id of ids) {
-            const r = processWithIdentity(scans, Object.assign({}, opts, { maxSwaps: 0 }), id);
-            if (r.ok) return r;
+        /* Like ASolver's Mapper: match whole pieces, keep the naming of the
+           centres (and grid rotations) with the lowest total cost. */
+        let best = null;
+        const tryIds = (opts.expectedRotByScan || opts.motions) ? ids : ids.slice(0, 2);
+        for (const id of tryIds) {
+            const r = pieceProcess(scans, opts, id);
+            if (!best || r.cost < best.cost) best = r;
         }
-        const last = processWithIdentity(scans, opts, ids[0]);
-        if (!last.ok && duplicate)
+        if (duplicate && best.fixed.length > 12)
             return { ok: false, errors: [{ type: "centre", message: "Two scans seem to show the same face (same centre colour). Scan again.", facelets: [] }] };
-        return last;
-    }
-
-    function processWithIdentity(scans, opts, faceOfScanGiven) {
-        const cls = classifyScans(scans, opts.overrides, faceOfScanGiven);
-        const { faceOfScan, costs } = cls;
-        let letters = cls.letters;
-
-        if (new Set(faceOfScan).size !== 6) {
-            return { ok: false, errors: [{ type: "centre", message: "Two faces have the same centre colour. Scan again.", facelets: [] }] };
-        }
-
-        const expected = {};
-        const expRot = opts.expectedRotByScan || (opts.motions ? expectedRotations(faceOfScan, opts.motions) : null);
-        if (expRot) faceOfScan.forEach((f, s) => { expected[f] = expRot[s] || 0; });
-
-        const attempt = (lt) => {
-            const grid = {};
-            faceOfScan.forEach((f, s) => { grid[f] = lt[s]; });
-            return solveOrientation(grid, expected);
-        };
-
-        let res = attempt(letters);
-        let fixed = [];
-        let fixedLetters = null;
-
-        if (!res && (opts.maxSwaps === undefined || opts.maxSwaps > 0)) {
-            /* Several stickers may be misread at once (e.g. red/orange only a
-               few degrees of hue apart). Take the least certain stickers and
-               try every mix of "best" / "second-best" colour that still has
-               9 of each colour; keep the valid cube with the smallest total
-               extra cost. */
-            const cand = [];
-            for (let s = 0; s < 6; s++) for (let k = 0; k < 9; k++) {
-                if (k === 4) continue;
-                const c = costs[s][k], cur = letters[s][k];
-                let alt = null, altC = Infinity;
-                FACES.forEach(f => { if (f !== cur && c[f] < altC) { altC = c[f]; alt = f; } });
-                if (altC < 1e5) cand.push({ s, k, cur, alt, extra: altC - c[cur] });
-            }
-            cand.sort((a, b) => a.extra - b.extra);
-            const K = Math.min(12, cand.length);
-            let bestExtra = Infinity;
-            for (let mask = 1; mask < (1 << K); mask++) {
-                const delta = {};
-                let extra = 0;
-                for (let i = 0; i < K; i++) if (mask & (1 << i)) {
-                    const c = cand[i];
-                    delta[c.cur] = (delta[c.cur] || 0) - 1;
-                    delta[c.alt] = (delta[c.alt] || 0) + 1;
-                    extra += c.extra;
-                }
-                if (extra >= bestExtra || Object.keys(delta).some(f => delta[f] !== 0)) continue;
-                const lt = letters.map(r => r.slice());
-                const changed = [];
-                for (let i = 0; i < K; i++) if (mask & (1 << i)) {
-                    const c = cand[i];
-                    lt[c.s][c.k] = c.alt;
-                    changed.push({ scan: c.s, index: c.k, from: c.cur, to: c.alt });
-                }
-                const r = attempt(lt);
-                if (r) { res = r; bestExtra = extra; fixed = changed; fixedLetters = lt; }
-            }
-            if (res) letters = fixedLetters;
-        }
-
-        if (!res) {
-            /* Swap the colours of two stickers whose readings were
-               uncertain, cheapest swaps first. Swapping keeps every
-               colour at exactly 9 stickers. */
-            const list = [];
-            for (let s = 0; s < 6; s++) for (let k = 0; k < 9; k++) if (k !== 4) list.push({ s, k });
-            const pairs = [];
-            for (let a = 0; a < list.length; a++) {
-                for (let b = a + 1; b < list.length; b++) {
-                    const A = list[a], B = list[b];
-                    const la = letters[A.s][A.k], lb = letters[B.s][B.k];
-                    if (la === lb) continue;
-                    const ca = costs[A.s][A.k], cb = costs[B.s][B.k];
-                    const extra = ca[lb] + cb[la] - ca[la] - cb[lb];
-                    pairs.push({ A, B, la, lb, extra });
-                }
-            }
-            pairs.sort((x, y) => x.extra - y.extra);
-            const limit = Math.min(opts.maxSwaps === undefined ? 150 : opts.maxSwaps, pairs.length);
-            for (let i = 0; i < limit && !res; i++) {
-                const p = pairs[i];
-                if (p.extra > 1e5) break;
-                const lt = letters.map(r => r.slice());
-                lt[p.A.s][p.A.k] = p.lb;
-                lt[p.B.s][p.B.k] = p.la;
-                const r = attempt(lt);
-                if (r) {
-                    res = r;
-                    letters = lt;
-                    fixed = [{ scan: p.A.s, index: p.A.k, from: p.la, to: p.lb }, { scan: p.B.s, index: p.B.k, from: p.lb, to: p.la }];
-                }
-            }
-        }
-
-        if (!res) {
-            /* Not fixable automatically: report problems for the most
-               likely orientation so the user can correct them. */
-            const grid = {};
-            faceOfScan.forEach((f, s) => { grid[f] = letters[s]; });
-            const rot = {};
-            FACES.forEach(f => { rot[f] = expected[f] || 0; });
-            const s = buildFacelets(grid, rot);
-            const v = validate(s);
-            const rotByScan = faceOfScan.map(f => rot[f]);
-            return { ok: false, facelets: s, letters, faceOfScan, rotByScan, fixed, errors: v.errors };
-        }
-
-        const rotByScan = faceOfScan.map(f => res.rot[f]);
-        return { ok: true, facelets: res.facelets, letters, faceOfScan, rotByScan, fixed, errors: [], solutions: res.solutions };
+        if (best.fixed.length > 16)
+            return Object.assign({}, best, { ok: false, errors: [{ type: "unreadable", message: "Too many stickers could not be read reliably (" + best.fixed.length + "). Check the glowing stickers or scan again in better light.", facelets: best.fixed.map(x => x.facelet) }] });
+        return best;
     }
 
     /* ---------- piece helpers for manual painting ---------- */
@@ -848,7 +987,7 @@
     const api = {
         FACES, SCHEME, REFERENCE_RGB, PROTOTYPES,
         rgbToLab, labDistance, redmeanDistance, medianRGB,
-        nearestCubeColourDistance, chromaticity, sameColour, analyzeFaceImage, rgbToHsv, hsvDistance,
+        nearestCubeColourDistance, chromaticity, sameColour, analyzeFaceImage, rgbToHsv, hsvDistance, detectFaceGrid,
         hungarian, identifyCentres, classifyScans, guessLetter,
         validate, isValid, rotateGrid, buildFacelets, solveOrientation,
         processScans, cornerChiralityOk, expectedRotations, imageUpFor, NORMAL,

@@ -6,9 +6,11 @@ step on a 3D model.
 
 ## How scanning works
 
-1. **Sampling** – each sticker is read on a 7x7 grid of points kept 20% away from
-   its edges (so the black plastic is ignored), and the median colour is used so
-   glare spots don't spoil the reading.
+1. **Tracking grid and sampling** – the cube face is found anywhere in the camera
+   view (4 evenly spaced lines each way: outer edges and the gaps between
+   stickers) and the grid moves onto it, turning blue when locked. Each sticker is
+   read on a 7x7 grid of points kept 20% away from its edges, and the median
+   colour is used so glare spots don't spoil the reading.
 2. **Auto-capture** – start with **any face**, then follow the moves on screen
    (tilt towards you, turn left ×3, tilt). A face is captured after about 1.2 s
    of steady picture with unchanging colours; the colours are averaged over that
@@ -23,14 +25,16 @@ step on a 3D model.
    stickerless cubes), with the rule that each colour appears exactly 9 times
    (optimal assignment). Where the browser allows it, white balance is locked
    after the first face.
-4. **Orientation** – every rotation of every face is tried, and the combination
-   that forms a real, solvable cube is used, so small mistakes in how the cube is
-   held don't matter.
-5. **Validation and auto-fix** – corners, edges, twist, flip and parity are
-   checked. If the reading is impossible, the least certain stickers are switched
-   to their second-best colour (every combination that keeps 9 of each colour is
-   tried) to find a valid cube; corrected stickers glow so you can check them. Problems that can't
-   be fixed automatically are explained, with the stickers involved glowing.
+4. **Whole-piece matching** – like a real cube, every scanned corner and edge must
+   be one of the 8 corners / 12 edges, each used once. Each scanned piece is scored
+   against every real piece in every orientation and the best overall assignment
+   is chosen; then twist, flip and parity are enforced with the cheapest changes.
+   A sticker whose colour is unclear (e.g. red vs orange on stickerless cubes) is
+   decided by the piece it belongs to. Stickers that were corrected glow so you can
+   check them.
+5. **Orientation** – each face's rotation follows from the scan moves; if the moves
+   weren't followed, the plausible rotations are searched and the lowest-cost cube
+   is used.
 
 After scanning, the 3D cube turns to match how you are holding the real cube
 (last scanned face towards you, same side up), so the solution moves can be
