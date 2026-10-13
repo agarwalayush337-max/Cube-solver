@@ -112,3 +112,57 @@ Object.keys(realReadings).forEach(f => realReadings[f].forEach(rgb =>
     assert(L.guessLetter(rgb) === f, `live guess ${JSON.stringify(rgb)} -> ${L.SCHEME[f]} (got ${L.SCHEME[L.guessLetter(rgb)]})`)));
 assert(!L.sameColour([219, 77, 52], [143, 31, 24]), "stickerless red and orange centres are different");
 assert(L.sameColour([219, 77, 52], [150, 52, 35]), "same orange centre in dimmer light counts as same");
+
+/* --- start from any face: physical simulation of the scan moves --- */
+const FACELET_POS = {
+    U: [[-1,1,-1],[0,1,-1],[1,1,-1],[-1,1,0],[0,1,0],[1,1,0],[-1,1,1],[0,1,1],[1,1,1]],
+    R: [[1,1,1],[1,1,0],[1,1,-1],[1,0,1],[1,0,0],[1,0,-1],[1,-1,1],[1,-1,0],[1,-1,-1]],
+    F: [[-1,1,1],[0,1,1],[1,1,1],[-1,0,1],[0,0,1],[1,0,1],[-1,-1,1],[0,-1,1],[1,-1,1]],
+    D: [[-1,-1,1],[0,-1,1],[1,-1,1],[-1,-1,0],[0,-1,0],[1,-1,0],[-1,-1,-1],[0,-1,-1],[1,-1,-1]],
+    L: [[-1,1,-1],[-1,1,0],[-1,1,1],[-1,0,-1],[-1,0,0],[-1,0,1],[-1,-1,-1],[-1,-1,0],[-1,-1,1]],
+    B: [[1,1,-1],[0,1,-1],[-1,1,-1],[1,0,-1],[0,0,-1],[-1,0,-1],[1,-1,-1],[0,-1,-1],[-1,-1,-1]]
+};
+const MOVES = { tilt: [[1,0,0],[0,0,1],[0,-1,0]], turn: [[0,0,-1],[0,1,0],[1,0,0]] };
+const SEQ = ["tilt", "turn", "turn", "turn", "tilt"];
+const mm = (A, B) => A.map(r => [0,1,2].map(j => r[0]*B[0][j] + r[1]*B[1][j] + r[2]*B[2][j]));
+function randomOrientation() {
+    /* random sequence of quarter turns of the whole cube */
+    let Q = [[1,0,0],[0,1,0],[0,0,1]];
+    const Rx = [[1,0,0],[0,0,-1],[0,1,0]], Ry = [[0,0,1],[0,1,0],[-1,0,0]];
+    for (let i = 0; i < 12; i++) Q = mm(rand() < 0.5 ? Rx : Ry, Q);
+    return Q;
+}
+/* What the camera sees: cell (row, col) lies at n + (1-row)*up + (col-1)*right */
+function cameraView(cube, Q) {
+    const right = Q[0], up = Q[1], n = Q[2];
+    let face = null;
+    for (const f of L.FACES) if (L.NORMAL[f].every((v, i) => v === n[i])) face = f;
+    const out = [];
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+        const p = [0,1,2].map(i => n[i] + (1 - row) * up[i] + (col - 1) * right[i]);
+        const k = FACELET_POS[face].findIndex(q => q.every((v, i) => v === p[i]));
+        out.push(cube[L.FACES.indexOf(face) * 9 + k]);
+    }
+    return { face, grid: out };
+}
+let anyStartOk = 0, motionsMatched = 0;
+const M = 300;
+TRUE_RGB_ACTIVE = STICKERLESS_RGB; NOISE = 3;
+for (let t = 0; t < M; t++) {
+    const cube = min2phase.randomCube();
+    let Q = randomOrientation();
+    const scans = [], faces = [];
+    for (let k = 0; k < 6; k++) {
+        const v = cameraView(cube, Q);
+        faces.push(v.face);
+        const light = 0.8 + rand() * 0.3;
+        scans.push(v.grid.map(c => shadeFace(TRUE_RGB_ACTIVE[c], light, [1, 1, 1])));
+        if (k < 5) Q = mm(MOVES[SEQ[k]], Q);
+    }
+    if (L.expectedRotations(faces, SEQ)) motionsMatched++;
+    const res = L.processScans(scans, { motions: SEQ });
+    if (res.ok && res.facelets === cube) anyStartOk++;
+}
+console.log(`any starting face, tilt/turn moves: ${anyStartOk}/${M} exact, moves recognised ${motionsMatched}/${M}`);
+assert(motionsMatched === M, "scan moves recognised from any starting face");
+assert(anyStartOk === M, "any starting face: every cube read exactly");

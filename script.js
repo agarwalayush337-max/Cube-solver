@@ -62,8 +62,12 @@ let liveCells = [];          // latest 9 sticker RGB readings from the camera
 let prevCells = null;
 let stableFrames = 0;
 let autoCapture = true;
-const STABLE_FRAMES_NEEDED = 18;   // ~0.6 s at 30 fps
-const STABLE_MAX_CHANGE = 1800;    // redmean distance between frames
+const STABLE_FRAMES_NEEDED = 36;   // ~1.2 s at 30 fps of a steady picture
+const STABLE_MAX_CHANGE = 1200;    // redmean distance allowed between frames
+const CAPTURE_PAUSE_MS = 900;      // show "captured" before looking for the next face
+let steadyFrames = [];             // readings during the current steady hold
+let steadyGuess = "";              // the 9 colour guesses must not change while holding
+let pausedUntil = 0;
 
 // Highlighted stickers (errors / auto-corrections)
 let highlightedMats = [];
@@ -235,6 +239,7 @@ camOverlay.innerHTML = `
             <div id="grid-overlay"></div>
             
             <button id="btn-capture" class="nav-btn" style="background:#00ff88; color:#000; bottom: 20px;">CAPTURE</button>
+            <button id="btn-undo" class="nav-btn" style="display:none; background:#333; color:#fff; left: 20px; font-size:12px; padding:10px 16px; bottom: 26px;">UNDO</button>
             <button id="btn-auto" class="nav-btn" style="background:#333; color:#fff; right: 20px; font-size:12px; padding:10px 16px; bottom: 26px;">AUTO: ON</button>
         </div>
 
@@ -305,6 +310,7 @@ for(let f=0; f<6; f++) {
 
 document.getElementById("btn-cancel").onclick = stopCameraMode;
 document.getElementById("btn-capture").onclick = () => captureFace(false);
+document.getElementById("btn-undo").onclick = undoLastFace;
 document.getElementById("btn-auto").onclick = function () {
     autoCapture = !autoCapture;
     this.innerText = autoCapture ? "AUTO: ON" : "AUTO: OFF";
@@ -376,7 +382,11 @@ function init() {
     renderer.setPixelRatio(window.devicePixelRatio);
     document.getElementById("canvas-container").appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    // light from the viewer's side so the face held towards you is bright
+    const fl = new THREE.DirectionalLight(0xffffff, 0.55);
+    fl.position.set(0, 2, 20);
+    scene.add(fl);
     const dl = new THREE.DirectionalLight(0xffffff, 1);
     dl.position.set(10, 20, 10);
     scene.add(dl);
@@ -458,6 +468,9 @@ async function startCameraMode() {
         prevCells = null;
         stableFrames = 0;
         autoArmed = true;
+        steadyFrames = [];
+        pausedUntil = 0;
+        document.getElementById("btn-undo").style.display = "none";
         clearHighlights();
         
         document.querySelectorAll('.p-sticker').forEach(s => s.style.backgroundColor = '#2a2a2a');
@@ -480,23 +493,25 @@ function stopCameraMode() {
     }
 }
 
-// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom
-// `expectedRot` = how many 90° clockwise turns map the camera grid onto the
-// standard facelet layout when the instructions are followed. The scan
-// processor tries all rotations anyway; this only breaks rare ties.
+// Start with ANY face. Between scans the user makes these moves; the app
+// uses them (with the centre colours) to know exactly how each face was
+// held, so no colour has to be on top.
+//   tilt = the bottom face comes towards the camera
+//   turn = the right face comes towards the camera (turn the cube left)
+const SCAN_MOVES = ["tilt", "turn", "turn", "turn", "tilt"];
 const SCAN_ORDER = [
-    { name: "TOP",    id: "face-1", rot: "rotateX(-90deg)", expectedRot: 0,
-      msg: "1. Scan TOP (White)", sub: "White facing the camera, green at the bottom" },
-    { name: "FRONT",  id: "face-0", rot: "rotateX(0deg)", expectedRot: 0,
-      msg: "2. Tilt → Scan FRONT (Green)", sub: "Tilt the cube so green faces you (white goes to the top)" },
-    { name: "RIGHT",  id: "face-2", rot: "rotateY(-90deg)", expectedRot: 0,
-      msg: "3. Turn → Scan RIGHT (Red)", sub: "Turn the cube to the left, keep white on top" },
-    { name: "BACK",   id: "face-3", rot: "rotateY(-180deg)", expectedRot: 0,
-      msg: "4. Turn → Scan BACK (Blue)", sub: "Turn the cube to the left again, white on top" },
-    { name: "LEFT",   id: "face-4", rot: "rotateY(-270deg)", expectedRot: 0,
-      msg: "5. Turn → Scan LEFT (Orange)", sub: "Turn the cube to the left again, white on top" },
-    { name: "BOTTOM", id: "face-5", rot: "rotateZ(90deg) rotateX(90deg)", expectedRot: 3,
-      msg: "6. Tilt → Scan BOTTOM (Yellow)", sub: "Tilt the cube so yellow faces you (orange goes to the top)" }
+    { id: "face-1", rot: "rotateX(-90deg)",
+      msg: "1/6 · Show any face", sub: "Hold the cube straight, face filling the square" },
+    { id: "face-0", rot: "rotateX(0deg)",
+      msg: "2/6 · Tilt the cube towards you", sub: "The bottom face comes to the camera" },
+    { id: "face-2", rot: "rotateY(-90deg)",
+      msg: "3/6 · Turn the cube left", sub: "The right face comes to the camera" },
+    { id: "face-3", rot: "rotateY(-180deg)",
+      msg: "4/6 · Turn the cube left", sub: "Keep the same face on top" },
+    { id: "face-4", rot: "rotateY(-270deg)",
+      msg: "5/6 · Turn the cube left", sub: "Keep the same face on top" },
+    { id: "face-5", rot: "rotateZ(90deg) rotateX(90deg)",
+      msg: "6/6 · Tilt the cube towards you", sub: "The last unseen face comes to the camera" }
 ];
 
 function updateCamInstruction() {
@@ -591,39 +606,66 @@ function updateLiveDots() {
     }
 }
 
-/* Auto-capture: capture when the picture has been steady for ~0.6 s,
-   the square shows a cube face, and it is a new face. After each capture
-   the cube has to be turned (the centre changes or the face leaves the
-   square) before the next auto-capture, so a face is never taken twice. */
+/* Auto-capture: capture when the picture has been steady for ~1.2 s,
+   the 9 colour guesses haven't changed during that time, the square shows
+   a cube face, and it is a new face. The colours used are the median over
+   the whole hold (not one frame), which removes flicker and motion blur.
+   After each capture the cube has to be turned (the centre changes or the
+   face leaves the square) before the next auto-capture. */
 let autoArmed = true;
 function trackStability() {
     const btn = document.getElementById("btn-capture");
+    const guess = [...document.getElementsByClassName("cam-dot")].map(d => d.dataset.color).join("");
+    let steady = false;
     if (prevCells && liveCells.length === 9) {
         const change = Math.max(...liveCells.map((c, i) => CubeLogic.redmeanDistance(c, prevCells[i])));
-        stableFrames = change < STABLE_MAX_CHANGE ? stableFrames + 1 : 0;
+        steady = change < STABLE_MAX_CHANGE && guess === steadyGuess;
     }
     prevCells = liveCells.map(c => c.slice());
+    steadyGuess = guess;
+    if (steady) { stableFrames++; steadyFrames.push(liveCells.map(c => c.slice())); }
+    else { stableFrames = 0; steadyFrames = []; }
 
     const last = scannedFacesData[scannedFacesData.length - 1];
     if (!autoArmed && (!liveLooksLikeCube || !last || !CubeLogic.sameColour(liveCells[4], last.rgb[4]))) autoArmed = true;
 
+    if (performance.now() < pausedUntil) { stableFrames = 0; steadyFrames = []; return; }
     if (!autoCapture) { btn.innerText = "CAPTURE"; return; }
     if (!liveLooksLikeCube) {
         btn.innerText = "ALIGN CUBE";
-        stableFrames = 0;
+        stableFrames = 0; steadyFrames = [];
         return;
     }
     if (!autoArmed || isAlreadyScanned(liveCells[4], null)) {
         btn.innerText = "TURN CUBE";
-        stableFrames = 0;
+        stableFrames = 0; steadyFrames = [];
         return;
     }
     const pct = Math.min(100, Math.round(stableFrames / STABLE_FRAMES_NEEDED * 100));
     btn.innerText = pct < 100 ? `HOLD STILL ${pct}%` : "CAPTURE";
-    if (stableFrames >= STABLE_FRAMES_NEEDED) {
-        stableFrames = 0;
-        captureFace(true);
+    if (stableFrames >= STABLE_FRAMES_NEEDED) captureFace(true);
+}
+
+/* Median of each sticker's colour over the frames of the steady hold. */
+function steadyReading() {
+    if (steadyFrames.length < 3) return liveCells.map(c => c.slice());
+    return [0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => CubeLogic.medianRGB(steadyFrames.map(f => f[i])));
+}
+
+function undoLastFace() {
+    if (!isCameraActive || !scannedFacesData.length) return;
+    scannedFacesData.pop();
+    scanIndex--;
+    const prefix = SCAN_ORDER[scanIndex].id.replace("face", "s");
+    for (let i = 0; i < 9; i++) {
+        const el = document.getElementById(`${prefix}-${i}`);
+        if (el) el.style.backgroundColor = "#2a2a2a";
     }
+    autoArmed = true;
+    stableFrames = 0; steadyFrames = [];
+    updateCamInstruction();
+    camSubMsg.innerText = "Last face removed – show it again.";
+    document.getElementById("btn-undo").style.display = scannedFacesData.length ? "block" : "none";
 }
 
 /* Has this face already been captured? Only nearly identical centre
@@ -653,7 +695,8 @@ function captureFace(isAuto) {
     // always accepted (the user decides), duplicates are reported later.
     if (isAuto && isAlreadyScanned(liveCells[4], manual[4])) return;
 
-    scannedFacesData.push({ rgb: liveCells.map(c => c.slice()), manual });
+    const reading = steadyReading();
+    scannedFacesData.push({ rgb: reading, manual });
 
     // freeze the captured colours on the small guide cube
     const prefix = SCAN_ORDER[scanIndex].id.replace("face", "s");
@@ -665,7 +708,12 @@ function captureFace(isAuto) {
 
     for (let d of dots) d.dataset.manual = "";
     stableFrames = 0;
+    steadyFrames = [];
     autoArmed = false;
+    pausedUntil = performance.now() + CAPTURE_PAUSE_MS;
+    const btn = document.getElementById("btn-capture");
+    btn.innerText = `✓ FACE ${scanIndex + 1} CAPTURED`;
+    document.getElementById("btn-undo").style.display = "block";
 
     scanIndex++;
     if (scanIndex >= 6) {
@@ -736,13 +784,34 @@ function scanCellToFacelet(face, rot, cell) {
     return "URFDLB".indexOf(face) * 9 + pos;
 }
 
+/* Turn the 3D cube so that `face` points at the viewer with the same
+   side up as in the camera (grid rotation `rot` from the scan), plus a
+   small tilt so the top and right faces are visible too. */
+const VIEW_TILT = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.42, -0.55, 0, "YXZ"));
+function orientViewToScan(face, rot) {
+    const n = CubeLogic.NORMAL[face];
+    const u = CubeLogic.imageUpFor(face, rot);
+    const x = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]];
+    // rows: camera right, up, towards-viewer – each in cube coordinates
+    const m = new THREE.Matrix4().set(
+        x[0], x[1], x[2], 0,
+        u[0], u[1], u[2], 0,
+        n[0], n[1], n[2], 0,
+        0, 0, 0, 1);
+    const target = new THREE.Quaternion().setFromRotationMatrix(m).premultiply(VIEW_TILT);
+    const start = pivotGroup.quaternion.clone(), t0 = performance.now();
+    (function step() {
+        const p = Math.min(1, (performance.now() - t0) / 700);
+        pivotGroup.quaternion.copy(start).slerp(target, p * (2 - p));
+        if (p < 1) requestAnimationFrame(step);
+        else if (solutionMoves.length) { updateDisplayMoves(); updateStepStatus(); }
+    })();
+}
+
 function processScannedData() {
     const scans = scannedFacesData.map(f => f.rgb);
     const overrides = scannedFacesData.map(f => f.manual);
-    const res = CubeLogic.processScans(scans, {
-        overrides,
-        expectedRotByScan: SCAN_ORDER.map(s => s.expectedRot)
-    });
+    const res = CubeLogic.processScans(scans, { overrides, motions: SCAN_MOVES });
 
     if (!res.facelets) {
         statusEl.innerText = res.errors[0].message;
@@ -753,6 +822,9 @@ function processScannedData() {
     clearSolution();
     applyFacelets(res.facelets);
     updatePaletteCounts();
+    // Show the cube the way it is held now: the last scanned face towards
+    // the user, with the same side up, so the solution moves match the hand.
+    if (res.faceOfScan && res.rotByScan) orientViewToScan(res.faceOfScan[5], res.rotByScan[5]);
 
     if (res.ok) {
         if (res.fixed.length) {
@@ -760,7 +832,7 @@ function processScannedData() {
             highlightFacelets(idx);
             statusEl.innerText = "Scanned! Auto-corrected " + res.fixed.length + " unclear stickers (glowing) – check them. Solving…";
         } else {
-            statusEl.innerText = "Scanned! Solving…";
+            statusEl.innerText = "Scanned! Keep the last face towards you – solving…";
         }
         statusEl.style.color = "#00ff88";
         solveCube();

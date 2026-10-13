@@ -9,10 +9,13 @@ step on a 3D model.
 1. **Sampling** – each sticker is read on a 7x7 grid of points kept 20% away from
    its edges (so the black plastic is ignored), and the median colour is used so
    glare spots don't spoil the reading.
-2. **Auto-capture** – a face is captured when the picture has been steady for
-   about 0.6 s, the guide square really contains a cube face (dark gaps between
-   stickers), and its centre is a face you haven't scanned yet. Tap a dot to set
-   its colour by hand; turn **AUTO** off to use the **CAPTURE** button only.
+2. **Auto-capture** – start with **any face**, then follow the moves on screen
+   (tilt towards you, turn left ×3, tilt). A face is captured after about 1.2 s
+   of steady picture with unchanging colours; the colours are averaged over that
+   hold. It must be a cube face (stickered or stickerless) and a face you haven't
+   scanned yet; after each capture, turn the cube before the next one. **UNDO**
+   removes the last face. Tap a dot to set its colour by hand; turn **AUTO** off
+   to use the **CAPTURE** button only.
 3. **Colour matching** – after all six faces, the centre colours decide which face
    each scan is. Each face's brightness and colour cast is estimated and removed,
    then every sticker is matched to a centre colour with the rule that each colour
@@ -25,7 +28,9 @@ step on a 3D model.
    valid cube; corrected stickers glow so you can check them. Problems that can't
    be fixed automatically are explained, with the stickers involved glowing.
 
-Solving uses the min2phase two-phase algorithm in a Web Worker.
+After scanning, the 3D cube turns to match how you are holding the real cube
+(last scanned face towards you, same side up), so the solution moves can be
+followed directly. Solving uses the min2phase two-phase algorithm in a Web Worker.
 
 ## Tests
 

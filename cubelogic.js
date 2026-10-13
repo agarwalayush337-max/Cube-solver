@@ -577,6 +577,76 @@
         return best;
     }
 
+    /* ---------- following the cube through the scan moves ---------- */
+
+    /* Camera frame: X = image right, Y = image up, Z = towards the camera.
+       Cube frame:   R = +x, U = +y, F = +z.
+       Moves the user makes between scans (as rotations in camera frame): */
+    const MOVES = {
+        tilt: [[1, 0, 0], [0, 0, 1], [0, -1, 0]],   /* bottom face comes to the camera */
+        turn: [[0, 0, -1], [0, 1, 0], [1, 0, 0]]    /* right face comes to the camera  */
+    };
+    const NORMAL = { U: [0, 1, 0], D: [0, -1, 0], R: [1, 0, 0], L: [-1, 0, 0], F: [0, 0, 1], B: [0, 0, -1] };
+    /* "up" of each face in the standard facelet layout */
+    const LAYOUT_UP = { U: [0, 0, -1], D: [0, 0, 1], R: [0, 1, 0], F: [0, 1, 0], L: [0, 1, 0], B: [0, 1, 0] };
+
+    const matMul = (A, B) => A.map(r => [0, 1, 2].map(j => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]));
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const eq = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+    const neg = a => a.map(v => -v);
+
+    /* all 24 orientations of a cube */
+    const ORIENTATIONS = (() => {
+        const out = [];
+        permutations([0, 1, 2]).forEach(p => {
+            for (let sgn = 0; sgn < 8; sgn++) {
+                const M = [0, 1, 2].map(i => [0, 1, 2].map(j => (j === p[i] ? ((sgn >> i) & 1 ? -1 : 1) : 0)));
+                const det = M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+                if (det === 1) out.push(M);
+            }
+        });
+        return out;
+    })();
+
+    /* The grid rotation (0..3 clockwise turns) that maps what the camera
+       saw onto the standard layout, given the cube direction that was at
+       the top of the image. */
+    function rotationForUp(face, imageUp) {
+        const up = LAYOUT_UP[face];
+        const right = cross(neg(NORMAL[face]), up);
+        if (eq(imageUp, up)) return 0;
+        if (eq(imageUp, right)) return 1;
+        if (eq(imageUp, neg(up))) return 2;
+        if (eq(imageUp, neg(right))) return 3;
+        return 0;
+    }
+    /* Inverse: which cube direction is at the top of the image for a face
+       scanned with grid rotation `rot` (used to orient the 3D view). */
+    function imageUpFor(face, rot) {
+        const up = LAYOUT_UP[face], right = cross(neg(NORMAL[face]), up);
+        return [up, right, neg(up), neg(right)][((rot % 4) + 4) % 4];
+    }
+
+    /* Given which face each scan showed and the moves made between scans
+       (e.g. ["tilt","turn","turn","turn","tilt"]), find how the cube was
+       held at the start and return the grid rotation of every scan.
+       Works whatever face the user starts with. Returns null if the scans
+       don't fit the moves (the user scanned in some other way). */
+    function expectedRotations(faceOfScan, motions) {
+        for (const Q0 of ORIENTATIONS) {
+            let Q = Q0, ok = true;
+            const rots = [];
+            for (let k = 0; k < faceOfScan.length; k++) {
+                /* rows of Q are the camera axes expressed in cube coordinates */
+                if (!eq(Q[2], NORMAL[faceOfScan[k]])) { ok = false; break; }
+                rots.push(rotationForUp(faceOfScan[k], Q[1]));
+                if (k < motions.length) Q = matMul(MOVES[motions[k]], Q);
+            }
+            if (ok) return rots;
+        }
+        return null;
+    }
+
     /* ---------- full scan pipeline with auto-fix ---------- */
 
     /* scans: 6 x 9 RGB (camera order). expectedRotByScan: rotation the
@@ -616,7 +686,8 @@
         }
 
         const expected = {};
-        if (opts.expectedRotByScan) faceOfScan.forEach((f, s) => { expected[f] = opts.expectedRotByScan[s] || 0; });
+        const expRot = opts.expectedRotByScan || (opts.motions ? expectedRotations(faceOfScan, opts.motions) : null);
+        if (expRot) faceOfScan.forEach((f, s) => { expected[f] = expRot[s] || 0; });
 
         const attempt = (lt) => {
             const grid = {};
@@ -701,7 +772,7 @@
         nearestCubeColourDistance, chromaticity, sameColour, analyzeFaceImage,
         hungarian, identifyCentres, classifyScans, guessLetter,
         validate, isValid, rotateGrid, buildFacelets, solveOrientation,
-        processScans, cornerChiralityOk,
+        processScans, cornerChiralityOk, expectedRotations, imageUpFor, NORMAL,
         CORNER_FACELETS, EDGE_FACELETS
     };
 
