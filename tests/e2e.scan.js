@@ -128,7 +128,10 @@ function cameraView(cube, Q) {
     let passed = 0;
     const RUNS = +process.env.RUNS || 3;
     for (let run = 0; run < RUNS; run++) {
-        const cube = min2phase.randomCube();
+        /* EASY=1: only 2-3 turns from solved, so most faces are (nearly) one
+           colour – e.g. an all-white face, or a red face with glare */
+        const EASY_SCRAMBLES = ["R U'", "F R", "U R2", "L' D B", "R", "B2 L"];
+        const cube = process.env.EASY ? min2phase.fromScramble(EASY_SCRAMBLES[run % EASY_SCRAMBLES.length]) : min2phase.randomCube();
         await page.evaluate(() => { window.__face = null; });
         await page.evaluate(() => startCameraMode());
         await page.waitForTimeout(500);

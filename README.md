@@ -13,11 +13,13 @@ step on a 3D model.
    colour is used so glare spots don't spoil the reading.
 2. **Auto-capture** – start with **any face**, then follow the moves on screen
    (tilt towards you, turn left ×3, tilt). A face is captured after about 1.2 s
-   of steady picture with unchanging colours; the colours are averaged over that
-   hold. It must be a cube face (stickered or stickerless) and a face you haven't
+   of steady picture; small shakes, glare and red/orange flicker don't restart
+   the count, and the colours are the median over that hold (the brightest 30% of
+   each sticker's samples are ignored, which removes glare). It must be a cube
+   face (stickered, stickerless, or all-white once the grid has locked onto it)
+   and a face you haven't
    scanned yet; after each capture, turn the cube before the next one. **UNDO**
-   removes the last face. Tap a dot to set its colour by hand; turn **AUTO** off
-   to use the **CAPTURE** button only.
+   removes the last face. Turn **AUTO** off to use the **CAPTURE** button only.
 3. **Colour matching** – after all six faces, the centre colours decide which face
    each scan is. Each face's brightness is estimated and removed, then every
    sticker is matched to a centre colour by hue, saturation and brightness (HSV –

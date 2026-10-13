@@ -71,7 +71,6 @@ const STABLE_FRAMES_NEEDED = 36;   // ~1.2 s at 30 fps of a steady picture
 const STABLE_MAX_CHANGE = 1200;    // redmean distance allowed between frames
 const CAPTURE_PAUSE_MS = 900;      // show "captured" before looking for the next face
 let steadyFrames = [];             // readings during the current steady hold
-let steadyGuess = "";              // the 9 colour guesses must not change while holding
 let pausedUntil = 0;
 
 // Highlighted stickers (errors / auto-corrections)
@@ -571,6 +570,7 @@ let gridState = null;      // smoothed { x, y, size } relative to the camera are
 let gridLostFrames = 0;
 let frameCounter = 0;
 let gridMoving = false;    // the grid is still sliding onto the cube
+let gridLocked = false;    // the grid has found the cube's 3x3 lattice
 
 function defaultGridRect(top) {
     const size = Math.min(window.innerWidth * 0.66, window.innerHeight * 0.30);
@@ -603,13 +603,16 @@ function trackFaceGrid() {
         // smooth the movement; jump if the cube moved a lot
         const jump = Math.abs(target.x - gridState.x) + Math.abs(target.y - gridState.y) > target.size * 0.5;
         const a = jump ? 1 : 0.35;
+        // small jitter of the detection is normal; only a real slide counts
         gridMoving = Math.abs(target.x - gridState.x) + Math.abs(target.y - gridState.y) +
-                     Math.abs(target.size - gridState.size) > target.size * 0.04;
+                     Math.abs(target.size - gridState.size) > target.size * 0.12;
+        gridLocked = true;
         gridState = { x: gridState.x + (target.x - gridState.x) * a, y: gridState.y + (target.y - gridState.y) * a,
                       size: gridState.size + (target.size - gridState.size) * a };
         gridEl.classList.add("locked");
     } else if (++gridLostFrames > 15) {
         gridMoving = false;
+        gridLocked = false;
         gridState = defaultGridRect(top);
         gridEl.classList.remove("locked");
     }
@@ -641,7 +644,7 @@ function processCameraFrame() {
    shows a cube face – stickered or stickerless). */
 let liveLooksLikeCube = false;
 function sampleStickers(ctx2, size) {
-    const res = CubeLogic.analyzeFaceImage(ctx2.getImageData(0, 0, size, size).data, size);
+    const res = CubeLogic.analyzeFaceImage(ctx2.getImageData(0, 0, size, size).data, size, { gridLocked });
     liveLooksLikeCube = res.looksLikeCube;
     return res.cells;
 }
@@ -683,18 +686,35 @@ function updateLiveDots() {
    After each capture the cube has to be turned (the centre changes or the
    face leaves the square) before the next auto-capture. */
 let autoArmed = true;
+let holdGuess = "";        // the colour guesses when the current hold started
+/* red and orange can flicker on a stickerless cube; that is decided later
+   from the median of the hold and the whole-cube check, so it doesn't count
+   as movement here */
+const guessGroup = l => (l === "L" ? "R" : l);
+function guessMismatches(a, b) {
+    let n = 0;
+    for (let i = 0; i < 9; i++) if (guessGroup(a[i]) !== guessGroup(b[i])) n++;
+    return n;
+}
 function trackStability() {
     const btn = document.getElementById("btn-capture");
     const guess = [...document.getElementsByClassName("cam-dot")].map(d => d.dataset.color).join("");
-    let steady = false;
-    if (prevCells && liveCells.length === 9) {
-        const change = Math.max(...liveCells.map((c, i) => CubeLogic.redmeanDistance(c, prevCells[i])));
-        steady = change < STABLE_MAX_CHANGE && guess === steadyGuess && !gridMoving;
+    /* Each frame is: "moved" (the cube moved or a different face is shown –
+       start over), "shaky" (a little noise or glare – doesn't count but
+       doesn't reset either) or "still" (counts towards the hold). */
+    let state = "moved";
+    if (prevCells && liveCells.length === 9 && holdGuess.length === 9) {
+        const changes = liveCells.map((c, i) => CubeLogic.redmeanDistance(c, prevCells[i]));
+        const big = changes.filter(d => d > STABLE_MAX_CHANGE * 4).length;
+        const changed = changes.filter(d => d > STABLE_MAX_CHANGE).length;
+        const moved = gridMoving || big >= 3 ||
+            guessGroup(guess[4]) !== guessGroup(holdGuess[4]) ||
+            guessMismatches(guess, holdGuess) > 2;
+        state = moved ? "moved" : changed ? "shaky" : "still";
     }
     prevCells = liveCells.map(c => c.slice());
-    steadyGuess = guess;
-    if (steady) { stableFrames++; steadyFrames.push(liveCells.map(c => c.slice())); }
-    else { stableFrames = 0; steadyFrames = []; }
+    if (state === "moved") { stableFrames = 0; steadyFrames = []; holdGuess = guess; }
+    else if (state === "still") { stableFrames++; steadyFrames.push(liveCells.map(c => c.slice())); }
 
     const last = scannedFacesData[scannedFacesData.length - 1];
     if (!autoArmed && (!liveLooksLikeCube || !last || !CubeLogic.sameColour(liveCells[4], last.rgb[4]))) autoArmed = true;
@@ -703,7 +723,7 @@ function trackStability() {
     if (!autoCapture) { btn.innerText = "CAPTURE"; return; }
     if (!liveLooksLikeCube) {
         btn.innerText = "ALIGN CUBE";
-        stableFrames = 0; steadyFrames = [];
+        stableFrames = 0; steadyFrames = []; holdGuess = "";
         return;
     }
     if (!autoArmed || isAlreadyScanned(liveCells[4], null)) {

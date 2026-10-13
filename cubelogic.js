@@ -105,8 +105,10 @@
        looksLikeCube is true when the square really shows a cube face:
        either dark gaps/plastic between most stickers (stickered cubes), or
        nine even patches that are all cube colours with at least two
-       clearly coloured ones (stickerless cubes have only hairline gaps). */
-    function analyzeFaceImage(img, size) {
+       clearly coloured ones (stickerless cubes have only hairline gaps), or
+       nine even cube-coloured patches where the tracking grid has locked
+       onto a 3x3 lattice (opts.gridLocked) – needed for white faces. */
+    function analyzeFaceImage(img, size, opts) {
         const INSET = 0.2, N = 7;
         const cell = size / 3;
         const lumAt = (x, y) => {
@@ -127,10 +129,13 @@
                         samples.push([img[p], img[p + 1], img[p + 2]]);
                     }
                 }
-                const med = medianRGB(samples);
+                /* glare: shiny stickers wash out towards white where the light
+                   reflects, so the brightest 30% of the samples are left out */
+                const byLum = samples.map(c => [0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], c]).sort((a, b) => a[0] - b[0]);
+                const med = medianRGB(byLum.slice(0, Math.ceil(byLum.length * 0.7)).map(e => e[1]));
                 cells.push(med);
                 /* how even the sticker is: median absolute deviation of luminance */
-                const lum = samples.map(c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]).sort((a, b) => a - b);
+                const lum = byLum.map(e => e[0]);
                 const m = lum[lum.length >> 1];
                 const dev = lum.map(v => Math.abs(v - m)).sort((a, b) => a - b);
                 spreads.push(dev[dev.length >> 1]);
@@ -160,7 +165,7 @@
 
         let cubeColoured = 0, even = 0, chromatic = 0;
         cells.forEach((c, i) => {
-            if (nearestCubeColourDistance(c) < 28) cubeColoured++;
+            if (nearestCubeColourDistance(c) < 34) cubeColoured++;
             if (spreads[i] < 14) even++;
             const lab = rgbToLab(c);
             if (Math.hypot(lab[1], lab[2]) > 30) chromatic++;
@@ -168,7 +173,10 @@
         const bright = Math.max.apply(null, cellLum) >= 40;
         const looksLikeCube = bright && (
             (darkBorders >= 6 && cubeColoured >= 7) ||
-            (cubeColoured >= 8 && even >= 7 && chromatic >= 2));
+            (cubeColoured >= 8 && even >= 7 && chromatic >= 2) ||
+            /* the tracking grid found a 3x3 lattice here: an all-white (or
+               nearly all-white) face has no coloured stickers to go by */
+            (opts && opts.gridLocked && cubeColoured >= 7 && even >= 7));
         return { cells, looksLikeCube, darkBorders, cubeColoured, even, chromatic, spreads };
     }
 
@@ -901,6 +909,7 @@
         });
         let rotSets;
         const exp = opts.expectedRotByScan || (opts.motions ? expectedRotations(faceOfScan, opts.motions) : null);
+        if (!exp && opts.followingOnly) return null;
         if (exp) {
             const r = {}; faceOfScan.forEach((f, s) => { r[f] = exp[s] || 0; });
             rotSets = [r];
@@ -926,6 +935,7 @@
         return {
             ok: true, facelets: best.facelets, cost: best.cost, faceOfScan,
             rotByScan: faceOfScan.map(f => best.rot[f]), fixed, errors: [], solutions: 1,
+            followsMoves: !!exp,
             letters: cls.letters
         };
     }
@@ -956,9 +966,24 @@
            centres (and grid rotations) with the lowest total cost. */
         let best = null;
         const tryIds = (opts.expectedRotByScan || opts.motions) ? ids : ids.slice(0, 2);
-        for (const id of tryIds) {
-            const r = pieceProcess(scans, opts, id);
-            if (!best || r.cost < best.cost) best = r;
+        /* First the namings of the centres that fit the scan moves (fast: the
+           face rotations follow from the moves). On a nearly solved cube a
+           naming that doesn't fit the moves can, with freely chosen face
+           rotations, also give a valid cube – a wrong one – so the free
+           search is only used when the moves were probably not followed. */
+        if (opts.motions && !opts.expectedRotByScan) {
+            const fo = Object.assign({}, opts, { followingOnly: true });
+            for (const id of tryIds) {
+                const r = pieceProcess(scans, fo, id);
+                if (r && (!best || r.cost < best.cost)) best = r;
+            }
+            if (best && best.fixed.length > 6) best = null;
+        }
+        if (!best) {
+            for (const id of tryIds) {
+                const r = pieceProcess(scans, opts, id);
+                if (!best || r.cost < best.cost) best = r;
+            }
         }
         if (duplicate && best.fixed.length > 12)
             return { ok: false, errors: [{ type: "centre", message: "Two scans seem to show the same face (same centre colour). Scan again.", facelets: [] }] };

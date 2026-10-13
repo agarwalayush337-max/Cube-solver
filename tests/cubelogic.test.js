@@ -176,3 +176,43 @@ for (let t = 0; t < M; t++) {
 console.log(`any starting face, tilt/turn moves: ${anyStartOk}/${M} exact, moves recognised ${motionsMatched}/${M}`);
 assert(motionsMatched === M, "scan moves recognised from any starting face");
 assert(anyStartOk === M, "any starting face: every cube read exactly");
+
+/* Nearly solved cubes (faces of one colour, e.g. an all-white face): the
+   scan moves must decide the face rotations, not a free search. */
+{
+    const min2phase = require("../solver.js");
+    const EASY = ["R U'", "F R", "U R2", "L' D B", "R", "B2 L", "U", "D2 F'"];
+    let ok = 0, total = 0;
+    for (const sc of EASY) {
+        const cube = min2phase.fromScramble(sc);
+        for (let t = 0; t < 24; t++) {
+            let Q = randomOrientation();
+            const scans = [];
+            for (let k = 0; k < 6; k++) {
+                const v = cameraView(cube, Q);
+                const light = 0.8 + rand() * 0.3;
+                scans.push(v.grid.map(c => shadeFace(TRUE_RGB_ACTIVE[c], light, [1, 1, 1])));
+                if (k < 5) Q = mm(MOVES[SEQ[k]], Q);
+            }
+            const res = L.processScans(scans, { motions: SEQ });
+            total++;
+            if (res.ok && res.facelets === cube) ok++;
+        }
+    }
+    console.log(`nearly solved cubes, every starting orientation: ${ok}/${total} exact`);
+    assert(ok === total, "nearly solved cubes read exactly");
+}
+
+/* Real frames from a phone recording (tracking grid locked) */
+{
+    const fs = require("fs"), path = require("path");
+    const load = n => fs.readFileSync(path.join(__dirname, "fixtures", n));
+    const white = L.analyzeFaceImage(load("video-white-face.rgba"), 300);
+    const whiteLocked = L.analyzeFaceImage(load("video-white-face.rgba"), 300, { gridLocked: true });
+    assert(whiteLocked.looksLikeCube, "all-white face is accepted when the grid is locked");
+    assert(!white.looksLikeCube, "all-white patch alone (no locked grid) is not taken for a cube");
+    assert(whiteLocked.cells.every(c => L.guessLetter(c) === "U"), "all-white face reads white");
+    const red = L.analyzeFaceImage(load("video-red-face.rgba"), 300, { gridLocked: true });
+    assert(red.looksLikeCube, "red face from the video is accepted");
+    assert(red.cells.every(c => L.guessLetter(c) === "R"), "red face from the video reads red");
+}
