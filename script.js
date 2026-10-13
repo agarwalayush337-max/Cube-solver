@@ -57,7 +57,16 @@ let lastMouse = { x: 0, y: 0 };
 let videoStream = null;
 let isCameraActive = false;
 let scanIndex = 0;
-let scannedFacesData = [];
+let scannedFacesData = [];   // [{ rgb: [9 x [r,g,b]], manual: [9 x letter|null] }]
+let liveCells = [];          // latest 9 sticker RGB readings from the camera
+let prevCells = null;
+let stableFrames = 0;
+let autoCapture = true;
+const STABLE_FRAMES_NEEDED = 18;   // ~0.6 s at 30 fps
+const STABLE_MAX_CHANGE = 1800;    // redmean distance between frames
+
+// Highlighted stickers (errors / auto-corrections)
+let highlightedMats = [];
 
 /* =======================
    UI ELEMENTS
@@ -225,6 +234,7 @@ camOverlay.innerHTML = `
             <div id="grid-overlay"></div>
             
             <button id="btn-capture" class="nav-btn" style="background:#00ff88; color:#000; bottom: 20px;">CAPTURE</button>
+            <button id="btn-auto" class="nav-btn" style="background:#333; color:#fff; right: 20px; font-size:12px; padding:10px 16px; bottom: 26px;">AUTO: ON</button>
         </div>
 
         <div class="scan-bottom">
@@ -293,7 +303,12 @@ for(let f=0; f<6; f++) {
 }
 
 document.getElementById("btn-cancel").onclick = stopCameraMode;
-document.getElementById("btn-capture").onclick = captureFace;
+document.getElementById("btn-capture").onclick = () => captureFace(false);
+document.getElementById("btn-auto").onclick = function () {
+    autoCapture = !autoCapture;
+    this.innerText = autoCapture ? "AUTO: ON" : "AUTO: OFF";
+    stableFrames = 0;
+};
 
 statusEl.innerText = "Loading engine…";
 statusEl.style.color = "orange";
@@ -307,6 +322,7 @@ solverWorker.onmessage = (e) => {
         engineReady = true;
         statusEl.innerText = "Ready! Paint, Scan or Scramble.";
         statusEl.style.color = "#00ff00";
+        if (pendingSolve) { pendingSolve = false; solveCube(); }
     }
     if (d.type === "solution") {
         if (!d.solution || d.solution.startsWith("Error")) {
@@ -339,9 +355,8 @@ solverWorker.onmessage = (e) => {
         if(hintBox) hintBox.visible = false;
     }
     if (d.type === "error") {
-        statusEl.innerText = "Invalid Configuration";
+        statusEl.innerText = "Solver error: " + d.message;
         statusEl.style.color = "red";
-        alert("Solver Error: " + d.message);
     }
 };
 
@@ -437,7 +452,11 @@ async function startCameraMode() {
         camOverlay.style.display = 'block';
         isCameraActive = true;
         scanIndex = 0;
-        scannedFacesData = []; 
+        scannedFacesData = [];
+        liveCells = [];
+        prevCells = null;
+        stableFrames = 0;
+        clearHighlights();
         
         document.querySelectorAll('.p-sticker').forEach(s => s.style.backgroundColor = '#2a2a2a');
         const dots = document.getElementsByClassName("cam-dot");
@@ -459,48 +478,31 @@ function stopCameraMode() {
     }
 }
 
-// SEQUENCE: Front -> Top -> Right -> Back -> Left -> Bottom
-// This matches the video: Tilt Down, then Rotate Right, Right, Right, then Tilt to Bottom.
-// SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom (From Left)
 // SEQUENCE: Top -> Front -> Right -> Back -> Left -> Bottom
+// `expectedRot` = how many 90° clockwise turns map the camera grid onto the
+// standard facelet layout when the instructions are followed. The scan
+// processor tries all rotations anyway; this only breaks rare ties.
 const SCAN_ORDER = [
-    { name: "TOP",   id: "face-1", rot: "rotateX(-90deg)" },                     // 1. Start Top
-    { name: "FRONT", id: "face-0", rot: "rotateX(0deg)" },                       // 2. Rotate to Front
-    { name: "RIGHT", id: "face-2", rot: "rotateY(-90deg)" },                     // 3. Rotate to Right
-    { name: "BACK",  id: "face-3", rot: "rotateY(-180deg)" },                    // 4. Rotate to Back
-    { name: "LEFT",  id: "face-4", rot: "rotateY(-270deg)" },                    // 5. Rotate to Left
-    { name: "BOTTOM",id: "face-5", rot: "rotateZ(90deg) rotateX(90deg)" }        // 6. Twist Z & Flip X to Bottom
+    { name: "TOP",    id: "face-1", rot: "rotateX(-90deg)", expectedRot: 0,
+      msg: "1. Scan TOP (White)", sub: "White facing the camera, green at the bottom" },
+    { name: "FRONT",  id: "face-0", rot: "rotateX(0deg)", expectedRot: 0,
+      msg: "2. Tilt → Scan FRONT (Green)", sub: "Tilt the cube so green faces you (white goes to the top)" },
+    { name: "RIGHT",  id: "face-2", rot: "rotateY(-90deg)", expectedRot: 0,
+      msg: "3. Turn → Scan RIGHT (Red)", sub: "Turn the cube to the left, keep white on top" },
+    { name: "BACK",   id: "face-3", rot: "rotateY(-180deg)", expectedRot: 0,
+      msg: "4. Turn → Scan BACK (Blue)", sub: "Turn the cube to the left again, white on top" },
+    { name: "LEFT",   id: "face-4", rot: "rotateY(-270deg)", expectedRot: 0,
+      msg: "5. Turn → Scan LEFT (Orange)", sub: "Turn the cube to the left again, white on top" },
+    { name: "BOTTOM", id: "face-5", rot: "rotateZ(90deg) rotateX(90deg)", expectedRot: 3,
+      msg: "6. Tilt → Scan BOTTOM (Yellow)", sub: "Tilt the cube so yellow faces you (orange goes to the top)" }
 ];
 
 function updateCamInstruction() {
     if(scanIndex >= 6) return;
     const step = SCAN_ORDER[scanIndex];
     liveCube.style.transform = step.rot;
-    
-    if(scanIndex === 0) { 
-        camMsg.innerText = "1. Scan TOP (White)"; 
-        camSubMsg.innerText = "Start with the Top face"; 
-    }
-    else if(scanIndex === 1) { 
-        camMsg.innerText = "2. Rotate UP -> Scan FRONT"; 
-        camSubMsg.innerText = "Tilt cube to see Front (Green)"; 
-    }
-    else if(scanIndex === 2) { 
-        camMsg.innerText = "3. Rotate RIGHT -> Scan RIGHT"; 
-        camSubMsg.innerText = "Turn cube left to see Right (Red)"; 
-    }
-    else if(scanIndex === 3) { 
-        camMsg.innerText = "4. Rotate RIGHT -> Scan BACK"; 
-        camSubMsg.innerText = "Turn cube left to see Back (Blue)"; 
-    }
-    else if(scanIndex === 4) { 
-        camMsg.innerText = "5. Rotate RIGHT -> Scan LEFT"; 
-        camSubMsg.innerText = "Turn cube left to see Left (Orange)"; 
-    }
-    else if(scanIndex === 5) { 
-        camMsg.innerText = "6. Rotate UP -> Scan BOTTOM"; 
-        camSubMsg.innerText = "From Left, Tilt cube UP to see Bottom (Yellow)"; 
-    }
+    camMsg.innerText = step.msg;
+    camSubMsg.innerText = step.sub;
 }
 
 
@@ -539,84 +541,196 @@ function processCameraFrame() {
         const ctx2 = canvasEl.getContext("2d");
         ctx2.drawImage(videoEl, srcX, srcY, srcW, srcH, 0, 0, 300, 300);
         
-        const dots = document.getElementsByClassName("cam-dot");
-        const cellW = 300 / 3;
-        const cellH = 300 / 3;
-        
-        for(let row=0; row<3; row++) {
-            for(let col=0; col<3; col++) {
-                const x = col * cellW + cellW/2;
-                const y = row * cellH + cellH/2;
-                const frame = ctx2.getImageData(x-5, y-5, 10, 10).data;
-                let r=0, g=0, b=0;
-                for(let i=0; i<frame.length; i+=4) {
-                    r+=frame[i]; g+=frame[i+1]; b+=frame[i+2];
-                }
-                const count = frame.length / 4;
-                r = Math.floor(r/count); g = Math.floor(g/count); b = Math.floor(b/count);
-
-                const dot = dots[row*3 + col];
-                if(!dot.dataset.manual) {
-                    const match = getHsvColor(r, g, b); 
-                    dot.style.backgroundColor = hexToString(colors[match]);
-                    dot.dataset.color = match;
-                }
-            }
-        }
+        liveCells = sampleStickers(ctx2, 300);
+        updateLiveDots();
+        trackStability();
     }
     requestAnimationFrame(processCameraFrame);
 }
 
-function getHsvColor(r, g, b) {
-    const [h, s, v] = rgbToHsv(r, g, b);
-    if (s < 0.25 || (s < 0.40 && v > 0.8 && h > 45 && h < 90)) return 'U';
-    if (h > 160 && h < 270 && s > 0.3) return 'B';
-    if (h >= 330 || h <= 15) return 'R';
-    if (h > 15 && h <= 45) return 'L'; 
-    if (h > 45 && h <= 85) return 'D'; 
-    if (h > 85 && h <= 160) return 'F'; 
-    return v > 0.8 ? 'U' : 'U'; 
+/* Read the 9 stickers from the 300x300 crop of the guide square.
+   Each sticker is sampled on a 7x7 grid of points kept 20% away from
+   its edges (so the black plastic borders are ignored), and the
+   per-channel median is used so glare spots don't spoil the reading. */
+const STICKER_INSET = 0.2;
+const SAMPLES_PER_SIDE = 7;
+function sampleStickers(ctx2, size) {
+    const img = ctx2.getImageData(0, 0, size, size).data;
+    const cell = size / 3;
+    const cells = [];
+    for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 3; col++) {
+            const x0 = col * cell + cell * STICKER_INSET, x1 = (col + 1) * cell - cell * STICKER_INSET;
+            const y0 = row * cell + cell * STICKER_INSET, y1 = (row + 1) * cell - cell * STICKER_INSET;
+            const samples = [];
+            for (let i = 0; i < SAMPLES_PER_SIDE; i++) {
+                for (let j = 0; j < SAMPLES_PER_SIDE; j++) {
+                    const x = Math.round(x0 + (x1 - x0) * i / (SAMPLES_PER_SIDE - 1));
+                    const y = Math.round(y0 + (y1 - y0) * j / (SAMPLES_PER_SIDE - 1));
+                    const p = (y * size + x) * 4;
+                    samples.push([img[p], img[p + 1], img[p + 2]]);
+                }
+            }
+            cells.push(CubeLogic.medianRGB(samples));
+        }
+    }
+    liveLooksLikeCube = gridLooksLikeCube(img, size, cells);
+    return cells;
 }
 
-function rgbToHsv(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    let h, s, v = max;
-    const d = max - min;
-    s = max === 0 ? 0 : d / max;
-    if (max === min) h = 0; 
-    else {
-        switch (max) {
-            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-            case g: h = (b - r) / d + 2; break;
-            case b: h = (r - g) / d + 4; break;
+/* Does the guide square really contain a cube face? Real cubes have
+   dark plastic (or dark gaps) between stickers, so most of the 12 inner
+   borders must be clearly darker than the stickers on both sides.
+   This stops auto-capture from grabbing an empty background. */
+let liveLooksLikeCube = false;
+function gridLooksLikeCube(img, size, cells) {
+    const lum = (x, y) => {
+        const p = (Math.round(y) * size + Math.round(x)) * 4;
+        return 0.299 * img[p] + 0.587 * img[p + 1] + 0.114 * img[p + 2];
+    };
+    const cellLum = cells.map(c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
+    if (Math.max(...cellLum) < 40) return false;            // too dark / lens covered
+    const cell = size / 3, reach = cell * 0.15;
+    let darkBorders = 0;
+    for (let line = 1; line <= 2; line++) {
+        const L0 = line * cell;
+        for (let k = 0; k < 3; k++) {
+            const mid0 = k * cell + cell * 0.3, mid1 = (k + 1) * cell - cell * 0.3;
+            // vertical border between column line-1 and line, in row k
+            let minV = Infinity, minH = Infinity;
+            for (let d = -reach; d <= reach; d += 1) {
+                const colV = [], colH = [];
+                for (let t = mid0; t <= mid1; t += 3) {
+                    colV.push(lum(Math.min(size - 1, Math.max(0, L0 + d)), t));
+                    colH.push(lum(t, Math.min(size - 1, Math.max(0, L0 + d))));
+                }
+                colV.sort((a, b) => a - b); colH.sort((a, b) => a - b);
+                minV = Math.min(minV, colV[colV.length >> 1]);
+                minH = Math.min(minH, colH[colH.length >> 1]);
+            }
+            const aV = cellLum[k * 3 + line - 1], bV = cellLum[k * 3 + line];
+            const aH = cellLum[(line - 1) * 3 + k], bH = cellLum[line * 3 + k];
+            if (minV < 0.7 * Math.min(aV, bV)) darkBorders++;
+            if (minH < 0.7 * Math.min(aH, bH)) darkBorders++;
         }
-        h /= 6;
     }
-    return [h * 360, s, v];
+    return darkBorders >= 9;
+}
+
+/* Centre colours of the faces already captured – used as references
+   so the live preview gets more accurate as you go. */
+function knownCentreColours() {
+    const known = {};
+    scannedFacesData.forEach(f => {
+        const letter = f.manual[4] || CubeLogic.guessLetter(f.rgb[4]);
+        known[letter] = f.rgb[4];
+    });
+    return known;
+}
+
+function updateLiveDots() {
+    const dots = document.getElementsByClassName("cam-dot");
+    const known = knownCentreColours();
+    const step = SCAN_ORDER[scanIndex];
+    for (let i = 0; i < 9; i++) {
+        const dot = dots[i];
+        if (!dot.dataset.manual) {
+            const match = CubeLogic.guessLetter(liveCells[i], known);
+            dot.style.backgroundColor = hexToString(colors[match]);
+            dot.dataset.color = match;
+        }
+        // live-fill the face being scanned on the small 3D guide cube
+        if (step) {
+            const el = document.getElementById(`${step.id.replace("face", "s")}-${i}`);
+            if (el) el.style.backgroundColor = `rgb(${liveCells[i].map(Math.round).join(",")})`;
+        }
+    }
+}
+
+/* Auto-capture: once the picture has been steady for ~0.6 s and the
+   centre is a face that hasn't been scanned yet, capture it. */
+function trackStability() {
+    const btn = document.getElementById("btn-capture");
+    if (prevCells && liveCells.length === 9) {
+        const change = Math.max(...liveCells.map((c, i) => CubeLogic.redmeanDistance(c, prevCells[i])));
+        stableFrames = change < STABLE_MAX_CHANGE ? stableFrames + 1 : 0;
+    }
+    prevCells = liveCells.map(c => c.slice());
+
+    if (!autoCapture) { btn.innerText = "CAPTURE"; return; }
+    if (!liveLooksLikeCube) {
+        btn.innerText = "ALIGN CUBE";
+        stableFrames = 0;
+        return;
+    }
+    if (isAlreadyScanned(liveCells[4], null)) {
+        btn.innerText = "TURN CUBE";
+        stableFrames = 0;
+        return;
+    }
+    const pct = Math.min(100, Math.round(stableFrames / STABLE_FRAMES_NEEDED * 100));
+    btn.innerText = pct < 100 ? `HOLD STILL ${pct}%` : "CAPTURE";
+    if (stableFrames >= STABLE_FRAMES_NEEDED) {
+        stableFrames = 0;
+        captureFace(true);
+    }
+}
+
+/* Has a face with this centre already been captured? Centres are compared
+   by hue (lighting changes brightness much more than hue); white centres
+   have almost no hue, so any two near-grey centres count as the same. */
+function sameCentreColour(rgbA, rgbB) {
+    const a = CubeLogic.rgbToLab(rgbA), b = CubeLogic.rgbToLab(rgbB);
+    const ca = Math.hypot(a[1], a[2]), cb = Math.hypot(b[1], b[2]);
+    const NEUTRAL = 18;
+    if (ca < NEUTRAL || cb < NEUTRAL) return ca < NEUTRAL && cb < NEUTRAL;
+    let dh = Math.abs(Math.atan2(a[2], a[1]) - Math.atan2(b[2], b[1])) * 180 / Math.PI;
+    if (dh > 180) dh = 360 - dh;
+    return dh < 12;
+}
+
+function isAlreadyScanned(centreRgb, manualCentre) {
+    return scannedFacesData.some(f => {
+        if (manualCentre && f.manual[4]) return manualCentre === f.manual[4];
+        return sameCentreColour(centreRgb, f.rgb[4]);
+    });
 }
 
 function hexToString(hex) {
     return "#" + hex.toString(16).padStart(6, '0');
 }
 
-function captureFace() {
+function captureFace(isAuto) {
+    if (!isCameraActive || scanIndex >= 6 || liveCells.length !== 9) return;
     const dots = document.getElementsByClassName("cam-dot");
-    let currentFaceColors = [];
-    for(let i=0; i<9; i++) currentFaceColors.push(dots[i].dataset.color);
-
-    const faceId = SCAN_ORDER[scanIndex].id; 
-    for(let i=0; i<9; i++) {
-        const prefix = faceId.replace("face", "s"); 
-        const el = document.getElementById(`${prefix}-${i}`);
-        if(el) el.style.backgroundColor = hexToString(colors[currentFaceColors[i]]);
+    const manual = [];
+    const shown = [];
+    for (let i = 0; i < 9; i++) {
+        manual.push(dots[i].dataset.manual ? dots[i].dataset.color : null);
+        shown.push(dots[i].dataset.color);
     }
 
-    scannedFacesData.push(currentFaceColors);
-    for(let d of dots) d.dataset.manual = "";
+    // Don't accept the same face twice
+    if (isAlreadyScanned(liveCells[4], manual[4])) {
+        if (!isAuto) camSubMsg.innerText = "This face is already scanned – turn the cube as shown.";
+        return;
+    }
+
+    scannedFacesData.push({ rgb: liveCells.map(c => c.slice()), manual });
+
+    // freeze the captured colours on the small guide cube
+    const prefix = SCAN_ORDER[scanIndex].id.replace("face", "s");
+    for (let i = 0; i < 9; i++) {
+        const el = document.getElementById(`${prefix}-${i}`);
+        if (el) el.style.backgroundColor = hexToString(colors[shown[i]]);
+    }
+    if (navigator.vibrate) navigator.vibrate(60);
+
+    for (let d of dots) d.dataset.manual = "";
+    stableFrames = 0;
 
     scanIndex++;
-    if(scanIndex >= 6) {
+    if (scanIndex >= 6) {
         stopCameraMode();
         processScannedData();
     } else {
@@ -625,152 +739,101 @@ function captureFace() {
 }
 
 /* =========================================================
-   PART 2: SMART DATA PROCESSOR (Auto-Orientation)
+   PART 2: SCAN PROCESSING
+   - centre colours decide which face each scan is
+   - per-face lighting correction + "9 of each colour" matching
+   - every rotation of every face is tried; the valid cube wins
+   - if the reading is impossible, uncertain stickers are swapped
+     to find a valid cube (and shown to the user)
    ========================================================= */
 
-// Standard Cube Topology (Who is where?)
-// Format: [Top, Right, Bottom, Left] neighbors for each face
-/* =========================================================
-   STEP 2: SMART AUTO-ORIENTATION SOLVER
-   ========================================================= */
+/* Standard facelet positions (same order as the solver string) */
+const FACELET_LAYOUT = [
+    { face: 'U', norm: [0,1,0],  pts: [[-1,1,-1],[0,1,-1],[1,1,-1], [-1,1,0],[0,1,0],[1,1,0], [-1,1,1],[0,1,1],[1,1,1]] },
+    { face: 'R', norm: [1,0,0],  pts: [[1,1,1],[1,1,0],[1,1,-1], [1,0,1],[1,0,0],[1,0,-1], [1,-1,1],[1,-1,0],[1,-1,-1]] },
+    { face: 'F', norm: [0,0,1],  pts: [[-1,1,1],[0,1,1],[1,1,1], [-1,0,1],[0,0,1],[1,0,1], [-1,-1,1],[0,-1,1],[1,-1,1]] },
+    { face: 'D', norm: [0,-1,0], pts: [[-1,-1,1],[0,-1,1],[1,-1,1], [-1,-1,0],[0,-1,0],[1,-1,0], [-1,-1,-1],[0,-1,-1],[1,-1,-1]] },
+    { face: 'L', norm: [-1,0,0], pts: [[-1,1,-1],[-1,1,0],[-1,1,1], [-1,0,-1],[-1,0,0],[-1,0,1], [-1,-1,-1],[-1,-1,0],[-1,-1,1]] },
+    { face: 'B', norm: [0,0,-1], pts: [[1,1,-1],[0,1,-1],[-1,1,-1], [1,0,-1],[0,0,-1],[-1,0,-1], [1,-1,-1],[0,-1,-1],[-1,-1,-1]] }
+];
 
-// 1. The "Truth" of a Solved Cube (Neighbor Order: [Top, Right, Bottom, Left])
-// This defines which face is where relative to the center, assuming the face is upright.
-/* =========================================================
-   STEP 2: CHAIN-LINK AUTO-ORIENTATION
-   ========================================================= */
+/* Material of the sticker at facelet index 0..53 */
+function faceletMaterial(index) {
+    const f = FACELET_LAYOUT[Math.floor(index / 9)];
+    const pt = f.pts[index % 9];
+    const cube = cubes.find(c => Math.round(c.position.x) === pt[0] && Math.round(c.position.y) === pt[1] && Math.round(c.position.z) === pt[2]);
+    if (!cube) return null;
+    const idx = getVisibleFaceMatIndex(cube, new THREE.Vector3(f.norm[0], f.norm[1], f.norm[2]));
+    return idx === -1 ? null : cube.material[idx];
+}
 
-// 1. The Standard Neighbors of every color (Solved State)
-// Order: [Top, Right, Bottom, Left]
-const CUBE_TOPOLOGY = {
-    U: ['B', 'R', 'F', 'L'], 
-    F: ['U', 'R', 'D', 'L'], 
-    R: ['U', 'B', 'D', 'F'], 
-    B: ['U', 'L', 'D', 'R'], 
-    L: ['U', 'F', 'D', 'B'], 
-    D: ['F', 'R', 'B', 'L']  
-};
+function applyFacelets(str) {
+    snapToGrid();
+    for (let i = 0; i < 54; i++) {
+        const m = faceletMaterial(i);
+        if (m && colors[str[i]] !== undefined) { m.color.setHex(colors[str[i]]); m.needsUpdate = true; }
+    }
+}
+
+function highlightFacelets(indices) {
+    clearHighlights();
+    indices.forEach(i => {
+        const m = faceletMaterial(i);
+        if (m && highlightedMats.indexOf(m) === -1) highlightedMats.push(m);
+    });
+}
+
+function clearHighlights() {
+    highlightedMats.forEach(m => { if (m.emissive) m.emissive.setHex(0x000000); });
+    highlightedMats = [];
+}
+
+/* Map a camera-grid position of scan `s` to its facelet index, given the
+   rotation the processor chose for that scan. */
+function scanCellToFacelet(face, rot, cell) {
+    // rotateGrid moves value at ROT_CW[i] to position i; follow `cell` forward
+    const ROT_CW = [6, 3, 0, 7, 4, 1, 8, 5, 2];
+    let pos = cell;
+    for (let t = 0; t < rot; t++) pos = ROT_CW.indexOf(pos);
+    return "URFDLB".indexOf(face) * 9 + pos;
+}
 
 function processScannedData() {
-    const centers = scannedFacesData.map(f => f[4]);
-    
-    // Safety check
-    if(new Set(centers).size !== 6) {
-        alert("Scan Error: Duplicate centers. Please Scan Again.");
+    const scans = scannedFacesData.map(f => f.rgb);
+    const overrides = scannedFacesData.map(f => f.manual);
+    const res = CubeLogic.processScans(scans, {
+        overrides,
+        expectedRotByScan: SCAN_ORDER.map(s => s.expectedRot)
+    });
+
+    if (!res.facelets) {
+        statusEl.innerText = res.errors[0].message;
+        statusEl.style.color = "red";
         return;
     }
 
-    const processedData = scannedFacesData.map((faceColors, scanIdx) => {
-        const myCenter = faceColors[4];
-        let refNeighborColor, refNeighborPosOnScreen;
-
-        // --- THE CHAIN LINK LOGIC ---
-        // We define ONE fixed anchor point for every scan based on the user's movement.
-        
-        if (scanIdx === 0) { 
-            // Scan 0 (Top): The User will next scan Face 1 (Front).
-            // Physically, Face 1 is at the BOTTOM edge of Face 0.
-            refNeighborColor = centers[1];
-            refNeighborPosOnScreen = 2; // 0=Top, 1=Right, 2=Bottom, 3=Left
-        } 
-        else if (scanIdx === 1) {
-            // Scan 1 (Front): The User just came from Face 0 (Top).
-            // Physically, Face 0 is at the TOP edge of Face 1.
-            refNeighborColor = centers[0];
-            refNeighborPosOnScreen = 0; // Top
-        }
-        else if (scanIdx >= 2 && scanIdx <= 4) {
-            // Scan 2, 3, 4 (Sides): User rotated RIGHT to get here.
-            // So the PREVIOUS face is on the LEFT edge.
-            refNeighborColor = centers[scanIdx - 1];
-            refNeighborPosOnScreen = 3; // Left
-        }
-        else if (scanIdx === 5) {
-            // Scan 5 (Bottom): User tilted UP from Face 4 (Left).
-            // Physically, Face 4 is at the TOP edge of Face 5.
-            refNeighborColor = centers[4];
-            refNeighborPosOnScreen = 0; // Top
-        }
-
-        // --- CALCULATE ROTATION ---
-        // 1. Find where the Standard Cube says this neighbor SHOULD be.
-        const standardNeighbors = CUBE_TOPOLOGY[myCenter];
-        const standardPos = standardNeighbors.indexOf(refNeighborColor);
-
-        // 2. Rotate grid so Screen Position matches Standard Position
-        // Formula: (ScreenPos - StandardPos + 4) % 4
-        // Example: Neighbor is at Screen Top (0). Should be at Right (1).
-        // Rotation = (0 - 1 + 4) % 4 = 3 (Rotate 270 deg / 90 deg CCW)
-        
-        // Wait! If I have Neighbor at Screen Top (0), and it belongs at Right (1).
-        // I need to rotate my grid 90 degrees CLOCKWISE so that the "Top" pixels move to the "Right".
-        // Let's trace: 
-        // [N, x, x] (N at Top) -> Rotate 90 -> [x, x, N] (N at Right)
-        // So Rotation = (Target - Source + 4) % 4
-        
-        const rotationNeeded = (standardPos - refNeighborPosOnScreen + 4) % 4;
-
-        return rotateFaceArray(faceColors, rotationNeeded);
-    });
-
-    // Paint the Cube
-    const centerMap = {};
-    processedData.forEach((data) => centerMap[data[4]] = data);
-
-    ['U', 'R', 'F', 'D', 'L', 'B'].forEach(faceKey => {
-        const faceData = centerMap[faceKey];
-        if(!faceData) return;
-        
-        let targetCubes = getCubesForFace(faceKey);
-        targetCubes = sortCubesForGrid(targetCubes, faceKey);
-        
-        for(let i=0; i<9; i++) {
-            const c = targetCubes[i];
-            if(!c.userData.isCenter) {
-                const hex = colors[faceData[i]];
-                const norm = getFaceNormal(faceKey);
-                const matIdx = getVisibleFaceMatIndex(c, norm);
-                if(matIdx !== -1) {
-                    c.material[matIdx].color.setHex(hex);
-                    c.material[matIdx].needsUpdate = true;
-                }
-            }
-        }
-    });
-
-    statusEl.innerText = "Scan Mapped! Solving...";
-    runLogicalAutofill(false); 
+    clearSolution();
+    applyFacelets(res.facelets);
     updatePaletteCounts();
-    solveCube();
-}
 
-// Helper: Rotate array 90 degrees Clockwise
-function rotateFaceArray(arr, times) {
-    let res = [...arr];
-    for(let t=0; t<times; t++) {
-        const temp = [...res];
-        res[0]=temp[6]; res[1]=temp[3]; res[2]=temp[0];
-        res[3]=temp[7]; res[4]=temp[4]; res[5]=temp[1];
-        res[6]=temp[8]; res[7]=temp[5]; res[8]=temp[2];
+    if (res.ok) {
+        if (res.fixed.length) {
+            const idx = res.fixed.map(fx => scanCellToFacelet(res.faceOfScan[fx.scan], res.rotByScan[fx.scan], fx.index));
+            highlightFacelets(idx);
+            statusEl.innerText = "Scanned! Auto-corrected " + res.fixed.length + " unclear stickers (glowing) – check them. Solving…";
+        } else {
+            statusEl.innerText = "Scanned! Solving…";
+        }
+        statusEl.style.color = "#00ff88";
+        solveCube();
+    } else {
+        const bad = [];
+        res.errors.forEach(e => (e.facelets || []).forEach(i => bad.push(i)));
+        highlightFacelets(bad);
+        statusEl.innerText = "Check the glowing stickers: " + res.errors[0].message + " Tap to fix, then SOLVE.";
+        statusEl.style.color = "orange";
     }
-    return res;
 }
-
-// Helper: Rotate array 90 degrees Clockwise 'times' times
-function rotateFaceArray(arr, times) {
-    let res = [...arr];
-    for(let t=0; t<times; t++) {
-        const temp = [...res];
-        // 0 1 2    6 3 0
-        // 3 4 5 -> 7 4 1
-        // 6 7 8    8 5 2
-        res[0]=temp[6]; res[1]=temp[3]; res[2]=temp[0];
-        res[3]=temp[7]; res[4]=temp[4]; res[5]=temp[1];
-        res[6]=temp[8]; res[7]=temp[5]; res[8]=temp[2];
-    }
-    return res;
-}
-
 
 function getFaceNormal(face) {
     if(face === 'U') return new THREE.Vector3(0,1,0);
@@ -780,65 +843,6 @@ function getFaceNormal(face) {
     if(face === 'F') return new THREE.Vector3(0,0,1);
     if(face === 'B') return new THREE.Vector3(0,0,-1);
 }
-
-function getCubesForFace(face) {
-    const list = [];
-    cubes.forEach(c => {
-        const x = Math.round(c.position.x);
-        const y = Math.round(c.position.y);
-        const z = Math.round(c.position.z);
-        if(face === 'U' && y === 1) list.push(c);
-        if(face === 'D' && y === -1) list.push(c);
-        if(face === 'R' && x === 1) list.push(c);
-        if(face === 'L' && x === -1) list.push(c);
-        if(face === 'F' && z === 1) list.push(c);
-        if(face === 'B' && z === -1) list.push(c);
-    });
-    return list;
-}
-
-// --- FIX: EXACT ORIENTATION MAPPING ---
-// This ensures colors land on the 3D cube EXACTLY as they appear in the camera grid
-// Ensure the 3D mapping knows this specific 'Front -> Top' orientation for accurate colors
-// --- FIX: EXACT ORIENTATION MAPPING (INVERTED 180°) ---
-/* =========================================================
-   FIX: STANDARD GEOMETRIC MAPPING (1:1 with Camera)
-   =========================================================
-   This maps the camera grid (Top-Left -> Bottom-Right) 
-   directly to the physical Top-Left -> Bottom-Right of each face.
-   
-   Assumption: When scanning a face, you hold the cube such that 
-   that face is "Upright" (e.g., White is effectively on Top).
-*/
-
-// PART 1: STANDARD MAPPING (Do not change this again)
-// This maps the camera grid 1:1 to the cube face.
-// --- STEP 1: STANDARD GEOMETRIC MAPPING (1:1 Physics) ---
-// STEP 1: STANDARD MAPPING (Physics Engine)
-function sortCubesForGrid(list, face) {
-    return list.sort((a,b) => {
-        const ax = Math.round(a.position.x), ay = Math.round(a.position.y), az = Math.round(a.position.z);
-        const bx = Math.round(b.position.x), by = Math.round(b.position.y), bz = Math.round(b.position.z);
-
-        // U (Top): Back-Row First (Z-Ascending), then Left-to-Right (X-Ascending)
-        if(face === 'U') return (az - bz) || (ax - bx);
-        // F (Front): Top-Row First (Y-Descending), then Left-to-Right (X-Ascending)
-        if(face === 'F') return (by - ay) || (ax - bx);
-        // R (Right): Top-Row First (Y-Descending), then Front-to-Back (Z-Descending)
-        // Note: On Right face, Z-Descending moves from Front edge to Back edge
-        if(face === 'R') return (by - ay) || (bz - az);
-        // B (Back): Top-Row First (Y-Descending), then Right-to-Left (X-Descending)
-        // Note: On Back face, X-Descending moves from Right edge to Left edge
-        if(face === 'B') return (by - ay) || (bx - ax);
-        // L (Left): Top-Row First (Y-Descending), then Back-to-Front (Z-Ascending)
-        // Note: On Left face, Z-Ascending moves from Back edge to Front edge
-        if(face === 'L') return (by - ay) || (az - bz);
-        // D (Bottom): Front-Row First (Z-Descending), then Left-to-Right (X-Ascending)
-        if(face === 'D') return (bz - az) || (ax - bx);
-    });
-}
-
-
 
 function getColorKey(hex) {
     for (const k in colors) { if (k !== "Core" && colors[k] === hex) return k; }
@@ -989,16 +993,33 @@ function generateBoardAnalysis() { return []; }
 function fillPiece(p, candidateColors, isSimulation) {
     let filledSomething = false;
     const missing = candidateColors.filter(c => !p.painted.includes(c));
-    p.faces.forEach(f => {
-        if (f.color === null && missing.length > 0) {
-            const fill = missing.shift(); 
-            f.mat.color.setHex(colors[fill]);
-            f.mat.needsUpdate = true;
-            filledSomething = true;
-            if(!isSimulation) {
-                autofillCount++;
-                statsDiv.innerText = "Autofilled: " + autofillCount;
-            }
+    const empty = p.faces.filter(f => f.color === null);
+    if (!missing.length || missing.length !== empty.length) return false;
+
+    // Choose the order of the missing colours. For corners only one order
+    // is a real piece (the other is its mirror image), so check handedness.
+    let order = missing;
+    if (p.type === 'corner') {
+        const perms = missing.length === 2 ? [missing, [missing[1], missing[0]]] : [missing];
+        order = perms.find(perm => {
+            let k = 0;
+            const cols = p.faces.map(f => f.color !== null ? f.color : perm[k++]);
+            return CubeLogic.cornerChiralityOk(p.faces.map(f => f.dir), cols);
+        });
+        if (!order) return false; // painted colours already form an impossible corner
+    } else if (missing.length > 1) {
+        return false; // an edge with both sides empty can go either way – don't guess
+    }
+
+    let k = 0;
+    empty.forEach(f => {
+        const fill = order[k++];
+        f.mat.color.setHex(colors[fill]);
+        f.mat.needsUpdate = true;
+        filledSomething = true;
+        if(!isSimulation) {
+            autofillCount++;
+            statsDiv.innerText = "Autofilled: " + autofillCount;
         }
     });
     return filledSomething;
@@ -1020,6 +1041,10 @@ function handlePaint(clientX, clientY) {
         if (obj.userData.isCenter) { statusEl.innerText = "Centers are fixed!"; return; }
         const matIndex = hit.face.materialIndex;
         if (obj.material[matIndex].color.getHex() !== colors[paintColor]) {
+             const m = obj.material[matIndex];
+             const hi = highlightedMats.indexOf(m);
+             if (hi !== -1) { m.emissive.setHex(0x000000); highlightedMats.splice(hi, 1); }
+             if (solutionMoves.length) clearSolution();
              obj.material[matIndex].color.setHex(colors[paintColor]);
              obj.material[matIndex].needsUpdate = true;
              updatePaletteCounts();
@@ -1103,6 +1128,8 @@ function rotateFace(move, reverse=false, onComplete=null) {
 
 function scrambleCube() {
     if (isAnimating) return;
+    clearSolution();
+    clearHighlights();
     statusEl.innerText = "Scrambling...";
     const moves = Array.from({length: 20}, () => SCRAMBLE_MOVES[Math.floor(Math.random()*SCRAMBLE_MOVES.length)]);
     let i = 0;
@@ -1110,16 +1137,56 @@ function scrambleCube() {
     nextMove();
 }
 
+let pendingSolve = false;
+
 function solveCube() {
-    if (!engineReady) return alert("Engine loading...");
+    if (isAnimating) return;
+    if (!engineReady) {
+        pendingSolve = true;
+        statusEl.innerText = "Solver engine still loading – will solve automatically…";
+        statusEl.style.color = "orange";
+        return;
+    }
     snapToGrid();
     const cubeStr = getCubeStateString();
-    if(cubeStr.includes("?")) { alert("Some faces are not painted!"); return; }
-    const counts = countColors(cubeStr);
-    if (Object.values(counts).some(v => v !== 9)) { alert(`Invalid Colors! Each color must appear exactly 9 times.`); return; }
+    if (cubeStr.includes("?")) {
+        const missing = [];
+        for (let i = 0; i < 54; i++) if (cubeStr[i] === "?") missing.push(i);
+        highlightFacelets(missing);
+        showProblem("Some stickers are not painted yet (glowing).");
+        return;
+    }
+    // Same checks the solver needs, but with a clear reason and the
+    // problem stickers glowing so they can be fixed by tapping.
+    const check = CubeLogic.validate(cubeStr);
+    if (!check.ok) {
+        const bad = [];
+        check.errors.forEach(e => (e.facelets || []).forEach(i => bad.push(i)));
+        highlightFacelets(bad);
+        showProblem(check.errors[0].message);
+        return;
+    }
+    clearHighlights();
     statusEl.innerText = "Computing solution...";
     statusEl.style.color = "cyan";
     solverWorker.postMessage({ type:"solve", cube: cubeStr });
+}
+
+function showProblem(msg) {
+    statusEl.innerText = "Can't solve: " + msg;
+    statusEl.style.color = "orange";
+}
+
+function clearSolution() {
+    solutionMoves = [];
+    displayMoves = [];
+    moveIndex = 0;
+    if (playInterval) { clearInterval(playInterval); playInterval = null; }
+    const btn = document.getElementById("playPauseBtn");
+    if (btn) btn.innerText = "PLAY";
+    solutionTextEl.innerText = "";
+    document.getElementById("action-controls").style.display = "flex";
+    document.getElementById("playback-controls").style.display = "none";
 }
 
 function getCubeStateString() {
@@ -1258,5 +1325,10 @@ function onInputEnd(e) {
 function animate() {
     requestAnimationFrame(animate);
     if (hintBox && hintBox.visible) { const time = Date.now() * 0.005; const scale = 1.05 + Math.sin(time * 2) * 0.05; hintBox.scale.set(scale, scale, scale); }
+    if (highlightedMats.length) {
+        // pulse the stickers that need checking
+        const glow = 0.25 + 0.25 * Math.sin(Date.now() * 0.008);
+        highlightedMats.forEach(m => m.emissive.setRGB(glow, glow, glow * 0.2));
+    }
     renderer.render(scene, camera);
 }

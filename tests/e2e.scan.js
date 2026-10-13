@@ -1,0 +1,134 @@
+/* End-to-end test: fake camera shows a scrambled cube face by face,
+   the app auto-captures, reads, solves and plays the solution.
+   Run: node tests/e2e.scan.js   (needs playwright + a local http server) */
+"use strict";
+const path = require("path");
+const http = require("http");
+const fs = require("fs");
+const { chromium } = require(process.env.PW_PATH || "playwright");
+const L = require("../cubelogic.js");
+const min2phase = require("../solver.js");
+
+const ROOT = path.join(__dirname, "..");
+const TYPES = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css" };
+const server = http.createServer((req, res) => {
+    const p = path.join(ROOT, decodeURIComponent(req.url.split("?")[0]));
+    fs.readFile(p, (err, data) => {
+        if (err) { res.writeHead(404); return res.end(); }
+        res.writeHead(200, { "Content-Type": TYPES[path.extname(p)] || "application/octet-stream" });
+        res.end(data);
+    });
+});
+
+/* Camera-like sticker colours */
+const CAM_RGB = {
+    U: [222, 226, 220], R: [175, 28, 38], F: [25, 150, 85],
+    D: [232, 208, 45], L: [238, 104, 35], B: [25, 72, 168]
+};
+const ORDER = ["U", "F", "R", "B", "L", "D"];
+const EXPECTED_ROT = [0, 0, 0, 0, 0, 3];
+
+(async () => {
+    await new Promise(r => server.listen(0, r));
+    const port = server.address().port;
+    const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });
+    const page = await browser.newPage({ viewport: { width: 420, height: 860 } });
+    const errors = [];
+    page.on("pageerror", e => errors.push(String(e)));
+    page.on("dialog", d => { errors.push("dialog: " + d.message()); d.dismiss(); });
+
+    /* fake camera: a canvas stream; the face drawn exactly under the guide square */
+    await page.addInitScript(() => {
+        const cv = document.createElement("canvas");
+        cv.width = 1280; cv.height = 720;
+        const g = cv.getContext("2d");
+        window.__face = null;
+        function draw() {
+            g.fillStyle = "#6b5440"; g.fillRect(0, 0, cv.width, cv.height);
+            const v = document.getElementById("cam-video"), grid = document.getElementById("grid-overlay");
+            if (window.__face && v && grid && v.videoWidth) {
+                const gr = grid.getBoundingClientRect(), vr = v.getBoundingClientRect();
+                const vRatio = v.videoWidth / v.videoHeight, dRatio = vr.width / vr.height;
+                let rw, rh, rx, ry;
+                if (dRatio > vRatio) { rw = vr.width; rh = vr.width / vRatio; rx = 0; ry = (vr.height - rh) / 2; }
+                else { rw = vr.height * vRatio; rh = vr.height; rx = (vr.width - rw) / 2; ry = 0; }
+                const sc = v.videoWidth / rw;
+                const sx = (gr.left - vr.left - rx) * sc, sy = (gr.top - vr.top - ry) * sc, sw = gr.width * sc;
+                const cell = sw / 3;
+                g.fillStyle = "#111"; g.fillRect(sx, sy, sw, sw);
+                window.__face.forEach((rgb, i) => {
+                    const r = Math.floor(i / 3), c = i % 3;
+                    g.fillStyle = `rgb(${rgb.join(",")})`;
+                    g.fillRect(sx + c * cell + cell * 0.08, sy + r * cell + cell * 0.08, cell * 0.84, cell * 0.84);
+                    /* a glare spot on some stickers */
+                    if ((i + window.__glare) % 4 === 0) { g.fillStyle = "rgba(255,255,255,0.9)"; g.fillRect(sx + c * cell + cell * 0.3, sy + r * cell + cell * 0.3, cell * 0.08, cell * 0.08); }
+                });
+            }
+            requestAnimationFrame(draw);
+        }
+        draw();
+        /* like a real camera: a fresh stream every time it is opened */
+        navigator.mediaDevices.getUserMedia = async () => cv.captureStream(30);
+    });
+
+    await page.goto(`http://localhost:${port}/index.html`);
+    await page.waitForFunction(() => document.getElementById("status").innerText.startsWith("Ready"), null, { timeout: 120000 });
+    console.log("engine ready");
+
+    let passed = 0;
+    const RUNS = +process.env.RUNS || 3;
+    for (let run = 0; run < RUNS; run++) {
+        const cube = min2phase.randomCube();
+        await page.evaluate(() => { window.__face = null; });
+        await page.evaluate(() => startCameraMode());
+        await page.waitForTimeout(500);
+
+        for (let step = 0; step < 6; step++) {
+            const f = ORDER[step];
+            const i = L.FACES.indexOf(f);
+            const k = cube.slice(i * 9, i * 9 + 9).split("");
+            const seen = L.rotateGrid(k, (4 - EXPECTED_ROT[step]) % 4);
+            const light = 0.7 + Math.random() * 0.45;
+            const cast = [1 + (Math.random() - 0.5) * 0.12, 1, 1 + (Math.random() - 0.5) * 0.12];
+            const rgb = seen.map(c => CAM_RGB[c].map((v, ch) => Math.max(0, Math.min(255, Math.round(v * light * cast[ch])))));
+            /* moving between faces: blank frames, then the new face */
+            await page.evaluate(() => { window.__face = null; });
+            await page.waitForTimeout(300);
+            await page.evaluate(([face, gl]) => { window.__face = face; window.__glare = gl; }, [rgb, step]);
+            try {
+                await page.waitForFunction(n => scanIndex > n || !isCameraActive, step, { timeout: 15000 });
+            } catch (e) {
+                const dbg = await page.evaluate(() => ({ scanIndex, btn: document.getElementById("btn-capture").innerText,
+                    dots: [...document.getElementsByClassName("cam-dot")].map(d => d.dataset.color).join(""),
+                    centres: scannedFacesData.map(f => CubeLogic.guessLetter(f.rgb[4], knownCentreColours())).join(""),
+                    stable: stableFrames, live: liveCells.map(c => c.map(Math.round).join("/")) }));
+                console.log("STALL at step", step, "face", f, JSON.stringify(dbg), "\n sent", JSON.stringify(rgb));
+                throw e;
+            }
+        }
+
+        await page.waitForFunction(() => document.getElementById("playback-controls").style.display === "flex" ||
+            /Can't|Check|error/i.test(document.getElementById("status").innerText), null, { timeout: 60000 });
+        const read = await page.evaluate(() => getCubeStateString());
+        const status = await page.evaluate(() => document.getElementById("status").innerText);
+        const okRead = read === cube;
+        console.log(`run ${run + 1}: read ${okRead ? "EXACT" : "WRONG"} | status: ${status}`);
+        if (!okRead) { console.log(" expected", cube, "\n got     ", read); continue; }
+
+        /* play the whole solution and confirm the cube ends solved */
+        const nMoves = await page.evaluate(() => solutionMoves.length);
+        await page.evaluate(() => togglePlay());
+        await page.waitForFunction(() => document.getElementById("status").innerText === "Solved!", null, { timeout: 120000 });
+        const finalState = await page.evaluate(() => getCubeStateString());
+        const solved = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB";
+        console.log(`  played ${nMoves} quarter turns -> ${finalState === solved ? "SOLVED" : "NOT SOLVED"}`);
+        if (finalState === solved) passed++;
+        await page.screenshot({ path: path.join(__dirname, `e2e-run${run + 1}.png`) });
+    }
+
+    console.log(`\n${passed}/${RUNS} scans read exactly and solved`);
+    if (errors.length) console.log("page errors:", errors);
+    await browser.close();
+    server.close();
+    process.exitCode = passed === RUNS && !errors.length ? 0 : 1;
+})().catch(e => { console.error(e); process.exit(1); });
