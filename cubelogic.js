@@ -64,11 +64,37 @@
        lightness. Separates colours that differ mainly in the R:G:B ratio,
        e.g. dark red vs red-orange on stickerless cubes. */
     function stickerFeature(rgb) {
-        const s = rgb[0] + rgb[1] + rgb[2] + 1;
-        return [rgbToLab(rgb)[0] * 0.3, 400 * rgb[0] / s, 400 * rgb[1] / s];
+        return rgbToHsv(rgb);
     }
     function featureDistance(a, b) {
-        return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        return hsvDistance(a, b);
+    }
+
+    /* HSV of camera values: hue in degrees, saturation and value 0..1.
+       Hue does not change with brightness, and it is what separates red
+       (hue ~2-4°) from orange (~8-14°) on stickerless cubes, where their
+       G:R ratios overlap. */
+    function rgbToHsv(rgb) {
+        const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+        let h = 0;
+        if (d > 1e-6) {
+            if (max === r) h = ((g - b) / d) % 6;
+            else if (max === g) h = (b - r) / d + 2;
+            else h = (r - g) / d + 4;
+            h *= 60;
+            if (h < 0) h += 360;
+        }
+        return [h, max === 0 ? 0 : d / max, max];
+    }
+    /* Hue difference counts in proportion to saturation (grey/white has no
+       meaningful hue); saturation separates white from coloured stickers;
+       value (brightness) counts a little. */
+    function hsvDistance(a, b) {
+        let dh = Math.abs(a[0] - b[0]);
+        if (dh > 180) dh = 360 - dh;
+        const s = Math.min(a[1], b[1]);
+        return Math.hypot(dh * 2.5 * s, (a[1] - b[1]) * 120, (a[2] - b[2]) * 40);
     }
 
     /* ---------- reading a camera image of one face ---------- */
@@ -226,8 +252,7 @@
 
     /* All ways of naming the 6 centres, most likely first (top `k`). */
     function rankCentreIdentities(centreRgbs, k) {
-        const labs = centreRgbs.map(rgbToLab);
-        const cost = labs.map(lab => FACES.map(f => protoDistanceLab(lab, f)));
+        const cost = centreRgbs.map(rgb => { const h = rgbToHsv(rgb); return FACES.map(f => protoDistanceHsv(h, f)); });
         return permutations([0, 1, 2, 3, 4, 5])
             .map(perm => ({ perm, c: perm.reduce((a, p, i) => a + cost[i][p], 0) }))
             .sort((a, b) => a.c - b.c)
@@ -236,6 +261,11 @@
     }
 
     /* Distance from a colour to the nearest prototype of face colour f. */
+    function protoDistanceHsv(hsv, f) {
+        let d = Infinity;
+        PROTOTYPES[f].forEach(p => { d = Math.min(d, hsvDistance(hsv, rgbToHsv(p))); });
+        return d;
+    }
     function protoDistanceLab(lab, f) {
         let d = Infinity;
         PROTO_LAB[f].forEach(p => { d = Math.min(d, labDistance(lab, p)); });
@@ -256,13 +286,18 @@
         return [l[0] / s, l[1] / s];
     }
 
-    /* Nearly identical colour (the same centre seen again)? Uses the
-       brightness-independent share of R and G in the camera's own values.
-       Deliberately strict: red vs orange on stickerless cubes differ by
-       ~0.11 here; "not sure" is treated as "different". */
+    /* Nearly identical colour (the same centre seen again)? Compared by
+       hue, which brightness doesn't change. Deliberately strict: red and
+       orange on stickerless cubes are only ~5° of hue apart; "not sure"
+       is treated as "different". White/grey has no reliable hue, so two
+       unsaturated colours count as the same. */
     function sameColour(rgbA, rgbB) {
-        const sa = rgbA[0] + rgbA[1] + rgbA[2] + 1, sb = rgbB[0] + rgbB[1] + rgbB[2] + 1;
-        return Math.hypot(rgbA[0] / sa - rgbB[0] / sb, rgbA[1] / sa - rgbB[1] / sb) < 0.03;
+        const a = rgbToHsv(rgbA), b = rgbToHsv(rgbB);
+        const GREY = 0.25;
+        if (a[1] < GREY || b[1] < GREY) return a[1] < GREY && b[1] < GREY;
+        let dh = Math.abs(a[0] - b[0]);
+        if (dh > 180) dh = 360 - dh;
+        return dh < 2 && Math.abs(a[1] - b[1]) < 0.1;
     }
 
     /* Classify all 54 stickers.
@@ -333,7 +368,7 @@
                 /* per face: overall brightness, plus only a small colour cast
                    (max ~10% per channel) so red can't be "explained" as
                    darkened orange */
-                const MAX_CAST = 0.1;
+                const MAX_CAST = 0;   /* brightness only: never shifts hue */
                 gain = scans.map((_, s) => {
                     const g = [0, 1, 2].map(ch => {
                         const v = [];
@@ -364,13 +399,13 @@
 
     /* Quick per-sticker guess for the live camera preview. */
     function guessLetter(rgb, knownCentres) {
-        const lab = rgbToLab(rgb);
+        const hsv = rgbToHsv(rgb);
         let best = "U", bestD = Infinity;
         FACES.forEach(f => {
             /* the real centre of this cube is the best reference once scanned */
             const d = (knownCentres && knownCentres[f])
-                ? labDistance(lab, rgbToLab(knownCentres[f])) * 0.8
-                : protoDistanceLab(lab, f);
+                ? hsvDistance(hsv, rgbToHsv(knownCentres[f])) * 0.8
+                : protoDistanceHsv(hsv, f);
             if (d < bestD) { bestD = d; best = f; }
         });
         return best;
@@ -655,11 +690,11 @@
     function processScans(scans, opts) {
         opts = opts || {};
         const centres = scans.map(s => s[4]);
+        /* a face scanned twice is only reported if no valid cube is found */
+        let duplicate = false;
         for (let a = 0; a < 6; a++)
             for (let b = a + 1; b < 6; b++)
-                if (sameColour(centres[a], centres[b]) && !(opts.overrides && opts.overrides[a] && opts.overrides[b] &&
-                    opts.overrides[a][4] && opts.overrides[b][4] && opts.overrides[a][4] !== opts.overrides[b][4]))
-                    return { ok: false, errors: [{ type: "centre", message: "Two scans have the same centre colour – the same face was scanned twice. Scan again.", facelets: [] }] };
+                if (sameColour(centres[a], centres[b])) duplicate = true;
 
         /* Most likely naming of the centres first; similar colours (e.g. red
            and orange on stickerless cubes) may need the second choice. The
@@ -673,7 +708,10 @@
             const r = processWithIdentity(scans, Object.assign({}, opts, { maxSwaps: 0 }), id);
             if (r.ok) return r;
         }
-        return processWithIdentity(scans, opts, ids[0]);
+        const last = processWithIdentity(scans, opts, ids[0]);
+        if (!last.ok && duplicate)
+            return { ok: false, errors: [{ type: "centre", message: "Two scans seem to show the same face (same centre colour). Scan again.", facelets: [] }] };
+        return last;
     }
 
     function processWithIdentity(scans, opts, faceOfScanGiven) {
@@ -697,6 +735,47 @@
 
         let res = attempt(letters);
         let fixed = [];
+        let fixedLetters = null;
+
+        if (!res && (opts.maxSwaps === undefined || opts.maxSwaps > 0)) {
+            /* Several stickers may be misread at once (e.g. red/orange only a
+               few degrees of hue apart). Take the least certain stickers and
+               try every mix of "best" / "second-best" colour that still has
+               9 of each colour; keep the valid cube with the smallest total
+               extra cost. */
+            const cand = [];
+            for (let s = 0; s < 6; s++) for (let k = 0; k < 9; k++) {
+                if (k === 4) continue;
+                const c = costs[s][k], cur = letters[s][k];
+                let alt = null, altC = Infinity;
+                FACES.forEach(f => { if (f !== cur && c[f] < altC) { altC = c[f]; alt = f; } });
+                if (altC < 1e5) cand.push({ s, k, cur, alt, extra: altC - c[cur] });
+            }
+            cand.sort((a, b) => a.extra - b.extra);
+            const K = Math.min(12, cand.length);
+            let bestExtra = Infinity;
+            for (let mask = 1; mask < (1 << K); mask++) {
+                const delta = {};
+                let extra = 0;
+                for (let i = 0; i < K; i++) if (mask & (1 << i)) {
+                    const c = cand[i];
+                    delta[c.cur] = (delta[c.cur] || 0) - 1;
+                    delta[c.alt] = (delta[c.alt] || 0) + 1;
+                    extra += c.extra;
+                }
+                if (extra >= bestExtra || Object.keys(delta).some(f => delta[f] !== 0)) continue;
+                const lt = letters.map(r => r.slice());
+                const changed = [];
+                for (let i = 0; i < K; i++) if (mask & (1 << i)) {
+                    const c = cand[i];
+                    lt[c.s][c.k] = c.alt;
+                    changed.push({ scan: c.s, index: c.k, from: c.cur, to: c.alt });
+                }
+                const r = attempt(lt);
+                if (r) { res = r; bestExtra = extra; fixed = changed; fixedLetters = lt; }
+            }
+            if (res) letters = fixedLetters;
+        }
 
         if (!res) {
             /* Swap the colours of two stickers whose readings were
@@ -769,7 +848,7 @@
     const api = {
         FACES, SCHEME, REFERENCE_RGB, PROTOTYPES,
         rgbToLab, labDistance, redmeanDistance, medianRGB,
-        nearestCubeColourDistance, chromaticity, sameColour, analyzeFaceImage,
+        nearestCubeColourDistance, chromaticity, sameColour, analyzeFaceImage, rgbToHsv, hsvDistance,
         hungarian, identifyCentres, classifyScans, guessLetter,
         validate, isValid, rotateGrid, buildFacelets, solveOrientation,
         processScans, cornerChiralityOk, expectedRotations, imageUpFor, NORMAL,

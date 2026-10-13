@@ -24,7 +24,11 @@ const server = http.createServer((req, res) => {
 /* STYLE=stickerless: colours measured from a real stickerless cube
    (dark red + red-orange, lime green, sky blue), hairline gaps, and the
    cube turned straight from one face to the next (no empty frames). */
-const STICKERLESS = process.env.STYLE === "stickerless";
+const STICKERLESS = process.env.STYLE === "stickerless" || process.env.STYLE === "video";
+/* STYLE=video: colours measured from a phone video of the same cube, where
+   red and orange are only ~6° of hue apart */
+const VIDEO_RGB = { U: [225, 222, 215], R: [205, 38, 28], F: [120, 225, 70],
+    D: [235, 230, 60], L: [248, 63, 25], B: [60, 140, 230] };
 const STICKERLESS_RGB = {
     U: [215, 212, 195], R: [143, 31, 24], F: [138, 229, 92],
     D: [216, 233, 76], L: [219, 77, 52], B: [70, 130, 195]
@@ -33,7 +37,7 @@ const CAM_RGB_CLASSIC = {
     U: [222, 226, 220], R: [175, 28, 38], F: [25, 150, 85],
     D: [232, 208, 45], L: [238, 104, 35], B: [25, 72, 168]
 };
-const CAM_RGB = STICKERLESS ? STICKERLESS_RGB : CAM_RGB_CLASSIC;
+const CAM_RGB = process.env.STYLE === "video" ? VIDEO_RGB : STICKERLESS ? STICKERLESS_RGB : CAM_RGB_CLASSIC;
 /* Physical simulation: the cube starts in a random orientation and the
    user follows the on-screen moves (tilt, turn left x3, tilt). */
 const FACELET_POS = {

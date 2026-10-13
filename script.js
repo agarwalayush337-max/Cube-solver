@@ -484,6 +484,20 @@ async function startCameraMode() {
     }
 }
 
+/* Keep the camera's colour settings fixed after the first face, so every
+   face is judged under the same white balance (hue is what separates red
+   from orange). Only some browsers allow this (e.g. Chrome on Android);
+   elsewhere it silently does nothing. */
+function lockWhiteBalance() {
+    try {
+        const track = videoStream && videoStream.getVideoTracks()[0];
+        const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.whiteBalanceMode && caps.whiteBalanceMode.includes("manual")) {
+            track.applyConstraints({ advanced: [{ whiteBalanceMode: "manual" }] }).catch(() => {});
+        }
+    } catch (e) { /* not supported */ }
+}
+
 function stopCameraMode() {
     isCameraActive = false;
     camOverlay.style.display = 'none';
@@ -697,6 +711,7 @@ function captureFace(isAuto) {
 
     const reading = steadyReading();
     scannedFacesData.push({ rgb: reading, manual });
+    if (scannedFacesData.length === 1) lockWhiteBalance();
 
     // freeze the captured colours on the small guide cube
     const prefix = SCAN_ORDER[scanIndex].id.replace("face", "s");

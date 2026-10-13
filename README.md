@@ -17,15 +17,19 @@ step on a 3D model.
    removes the last face. Tap a dot to set its colour by hand; turn **AUTO** off
    to use the **CAPTURE** button only.
 3. **Colour matching** – after all six faces, the centre colours decide which face
-   each scan is. Each face's brightness and colour cast is estimated and removed,
-   then every sticker is matched to a centre colour with the rule that each colour
-   appears exactly 9 times (optimal assignment).
+   each scan is. Each face's brightness is estimated and removed, then every
+   sticker is matched to a centre colour by hue, saturation and brightness (HSV –
+   hue is what separates red from orange, which can be only ~5° apart on
+   stickerless cubes), with the rule that each colour appears exactly 9 times
+   (optimal assignment). Where the browser allows it, white balance is locked
+   after the first face.
 4. **Orientation** – every rotation of every face is tried, and the combination
    that forms a real, solvable cube is used, so small mistakes in how the cube is
    held don't matter.
 5. **Validation and auto-fix** – corners, edges, twist, flip and parity are
-   checked. If the reading is impossible, uncertain stickers are swapped to find a
-   valid cube; corrected stickers glow so you can check them. Problems that can't
+   checked. If the reading is impossible, the least certain stickers are switched
+   to their second-best colour (every combination that keeps 9 of each colour is
+   tried) to find a valid cube; corrected stickers glow so you can check them. Problems that can't
    be fixed automatically are explained, with the stickers involved glowing.
 
 After scanning, the 3D cube turns to match how you are holding the real cube

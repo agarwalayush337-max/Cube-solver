@@ -97,11 +97,15 @@ const N = 300;
 const r1 = run(N, false, true);
 const r2 = run(N, true, true);
 const r3 = run(N, false, false);
+const VIDEO_RGB = { U: [225, 222, 215], R: [205, 38, 28], F: [120, 225, 70],
+    D: [235, 230, 60], L: [248, 63, 25], B: [60, 140, 230] };
+const r6 = run(N, false, true, VIDEO_RGB);
 const r4 = run(N, false, true, STICKERLESS_RGB);
 const r5 = run(N, true, true, STICKERLESS_RGB);
 assert(r1.wrong === 0 && r1.fail === 0, "normal light, scan order followed: every cube read exactly");
 assert(r2.ok / N >= 0.98, "harsh light, scan order followed: >= 98% exact");
 assert(r3.ok / N >= 0.97, "any scan order: >= 97% exact");
+assert(r6.wrong === 0 && r6.ok / N >= 0.99, "cube colours from the phone video (red/orange 6° apart): >= 99% exact");
 assert(r4.wrong === 0 && r4.ok / N >= 0.99, "stickerless cube, normal light: >= 99% exact");
 assert(r5.wrong <= 3 && r5.ok / N >= 0.93, "stickerless cube, harsh light: >= 93% exact");
 
@@ -110,6 +114,12 @@ const realReadings = { B: [[66, 126, 190], [73, 133, 197]], F: [[138, 229, 92], 
     D: [[214, 234, 76], [218, 234, 76]], L: [[219, 77, 52], [220, 80, 56]], R: [[143, 31, 24]], U: [[216, 214, 196], [215, 210, 191]] };
 Object.keys(realReadings).forEach(f => realReadings[f].forEach(rgb =>
     assert(L.guessLetter(rgb) === f, `live guess ${JSON.stringify(rgb)} -> ${L.SCHEME[f]} (got ${L.SCHEME[L.guessLetter(rgb)]})`)));
+/* red and orange measured from a phone video of the same stickerless cube:
+   hue ~2-4° vs ~8-14°, overlapping G:R ratios */
+[[196,37,25],[218,37,31],[210,38,28],[208,34,22],[197,36,27],[211,46,33]].forEach(rgb =>
+    assert(L.guessLetter(rgb) === "R", `video red ${JSON.stringify(rgb)} -> red (got ${L.SCHEME[L.guessLetter(rgb)]})`));
+[[247,65,36],[239,58,20],[244,63,10],[255,58,23],[253,70,33],[255,109,78],[254,69,17]].forEach(rgb =>
+    assert(L.guessLetter(rgb) === "L", `video orange ${JSON.stringify(rgb)} -> orange (got ${L.SCHEME[L.guessLetter(rgb)]})`));
 assert(!L.sameColour([219, 77, 52], [143, 31, 24]), "stickerless red and orange centres are different");
 assert(L.sameColour([219, 77, 52], [150, 52, 35]), "same orange centre in dimmer light counts as same");
 
